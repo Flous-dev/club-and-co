@@ -17,6 +17,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const hhmm = t => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 const ago = t => { const m = Math.round((now() - t) / 60000); return m < 1 ? "à l'instant" : m < 60 ? `il y a ${m} min` : `il y a ${Math.floor(m / 60)} h`; };
+const me = () => (S.user && S.user.name) || 'Client';
 const pick = a => a[Math.floor(Math.random() * a.length)];
 
 /* ---------- Données ---------- */
@@ -81,7 +82,12 @@ const DECLINE_REASONS = ['Pas le style du set', 'Déjà joué ce soir', 'Plutôt
 function seed() {
   const t = now();
   return {
-    v: 1, user: null, tab: 'home', screen: null, cat: 'cocktails', bar: 'main', pay: 'wallet',
+    v: 3, user: null, account: null, checkedIn: null, proUser: null, wallet: true, cards: [{ id: 'c4242', brand: 'VISA', last4: '4242', exp: '08/28' }],
+    outings: [
+      { id: 'o1', club: 'Nébula', event: 'Techno Thursday', date: 'jeu. 29 oct.', spent: 35, songs: 2, coat: true, ticket: 'Shotgun', orders: [{ code: 'K21', time: '00:42', lines: '2× Pinte 50cl', total: 20 }, { code: 'P37', time: '02:10', lines: '1× Néon Mojito · 1× Eau 50cl', total: 12 }] },
+      { id: 'o2', club: 'Le Hangar 9', event: 'Afro Nights', date: 'sam. 17 oct.', spent: 30, songs: 1, coat: false, ticket: 'Entrée sur place', orders: [{ code: 'A12', time: '01:15', lines: '1× Tournée x6', total: 30 }] },
+    ],
+    tab: 'home', screen: null, cat: 'cocktails', bar: 'main', pay: 'wallet',
     cart: [], tip: 0, orders: [], points: 40, coat: null, pro: null, budget: null, extras: [], ticket: null, barPaused: false, djHide: false, battWarned: false,
     notifs: [], takeover: null, notifOn: false, entryAt: t - 47 * 60000, np: { start: t - 40000 }, npOverride: null,
     requests: [
@@ -111,7 +117,7 @@ let S = load();
 function load() {
   try {
     const raw = JSON.parse(localStorage.getItem(STORE));
-    if (raw && raw.v === 1) return { ...seed(), ...raw, takeover: null };
+    if (raw && raw.v === 3) return { ...seed(), ...raw, takeover: null };
   } catch (e) { /* stockage indisponible */ }
   return seed();
 }
@@ -149,6 +155,7 @@ const P = {
   wallet: '<path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v4h-4a2 2 0 0 0 0 4h4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5"/>',
   share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
   phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   wave: '<path d="M2 12h2M6 8v8M10 4v16M14 7v10M18 10v4M22 12h0"/>',
 };
 const ic = (n, s = 20, extra = '') => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ${extra}>${P[n]}</svg>`;
@@ -166,6 +173,7 @@ function qr(seedStr) {
 }
 
 /* ---------- Calculs ---------- */
+const payOk = () => (S.pay === 'wallet' && S.wallet) || S.cards.some(c => c.id === S.pay);
 const cartCount = () => S.cart.reduce((a, l) => a + l.qty, 0);
 const cartSub = () => S.cart.reduce((a, l) => a + l.qty * l.unit, 0);
 const tipAmt = () => Math.round(cartSub() * S.tip) / 100;
@@ -339,24 +347,8 @@ function updateLive() {
 
 /* ---------- Vues : client ---------- */
 const bell = () => `<button class="icon-btn" data-a="notifs" aria-label="Notifications">${ic('bell')}${unread() ? '<i class="dot"></i>' : ''}</button>`;
-const topbar = (title, sub) => `<header class="topbar"><div><p class="eyebrow">${sub}</p><h1 class="h1">${title}</h1></div>${bell()}</header>`;
+const topbar = (title, sub) => `<header class="topbar"><div><p class="eyebrow">${sub}</p><h1 class="h1">${title}</h1></div><div class="row" style="gap:8px">${bell()}${avatarBtn()}</div></header>`;
 
-function vOnboarding() {
-  return `<div class="onb fade-in">
-    <div class="logo-big">Club<span>&amp;</span><br>Co</div>
-    <p class="tagline"><b>La nuit, sans la file.</b><br>Commande, paie, danse. On te prévient.</p>
-    <ul class="onb-feats">
-      <li><span class="fi">${ic('glass')}</span>Commande & paie depuis la piste</li>
-      <li><span class="fi">${ic('bell')}</span>Notifié dès que ton verre est prêt</li>
-      <li><span class="fi">${ic('music')}</span>Propose tes sons au DJ en direct</li>
-    </ul>
-    <div class="scan-card">${ic('qr', 28)}<div><b>QR scanné à l’entrée</b><p class="small muted">${CLUB.name} · ${CLUB.area} — ${CLUB.event}</p></div></div>
-    <input id="onb-name" class="field" placeholder="Ton prénom" autocomplete="given-name" maxlength="20">
-    <label class="check"><input type="checkbox" id="onb-age"><span>J’ai 18 ans ou plus — l’alcool n’est pas vendu aux mineurs</span></label>
-    <button class="btn lime block" style="margin-top:12px" data-a="enter">Entrer dans la soirée ${ic('chev', 18)}</button>
-    <p class="fine">Démo interactive — aucun paiement réel, aucune donnée envoyée.</p>
-  </div>`;
-}
 
 function orderLive(o) {
   const st = STATUS[o.status];
@@ -367,43 +359,147 @@ function orderLive(o) {
     ${ic('chev')}
   </button>`;
 }
-function npCard() {
-  const tr = currentTrack();
-  return `<button class="card np" style="width:100%;text-align:left" data-a="tab" data-tab="music">
-    <span class="np-art"><span class="eq"><i></i><i></i><i></i><i></i></span></span>
-    <span class="grow" style="min-width:0"><span class="eyebrow">En ce moment · DJ ${CLUB.dj}</span>
-      <span class="np-t" data-np-t style="display:block">${esc(tr.t)}</span><span class="muted small" data-np-a>${esc(tr.a)}</span>
-      <span class="progress"><i data-np-p style="width:${(tr.p * 100).toFixed(1)}%"></i></span></span>
-  </button>`;
+
+
+function vOnboarding() {
+  return `<div class="onb fade-in">
+    <div class="logo-big">Club<span>&amp;</span><br>Co</div>
+    <p class="tagline"><b>La nuit, sans la file.</b><br>Commande, paie, danse. On te prévient.</p>
+    <ul class="onb-feats">
+      <li><span class="fi">${ic('glass')}</span>Commande & paie depuis la piste</li>
+      <li><span class="fi">${ic('bell')}</span>Notifié dès que ton verre est prêt</li>
+      <li><span class="fi">${ic('music')}</span>Propose tes sons au DJ en direct</li>
+    </ul>
+    <p class="opt-label" style="margin-top:0">Crée ton compte</p>
+    <input id="onb-name" class="field" placeholder="Prénom" autocomplete="given-name" maxlength="20">
+    <input id="onb-email" class="field" style="margin-top:8px" type="email" placeholder="E-mail (pour retrouver tes billets)" autocomplete="email" maxlength="60">
+    <label class="check"><input type="checkbox" id="onb-age"><span>J’ai 18 ans ou plus — l’alcool n’est pas vendu aux mineurs</span></label>
+    <button class="btn lime block" style="margin-top:14px" data-a="enter">Créer mon compte ${ic('chev', 18)}</button>
+    <button class="pro-link" data-a="proLogin">${ic('lock', 13)} Je suis un club · Espace pro</button>
+  </div>`;
+}
+
+const avatarBtn = () => `<button class="icon-btn avatar-btn" data-a="account" aria-label="Mon compte">${esc(me()[0].toUpperCase())}</button>`;
+
+function vLobby() {
+  const last = S.outings[0];
+  return `<header class="topbar"><div class="brand">Club<span>&amp;</span>Co</div>${avatarBtn()}</header>
+  <div class="fade-in">
+    <p class="eyebrow">Salut ${esc(me())} 👋</p>
+    <h1 class="h1" style="font-size:34px;margin-top:6px">Prêt·e pour<br>ce soir ?</h1>
+    <button class="scan-cta" data-a="scan">
+      <span class="scan-ico">${ic('qr', 32)}</span>
+      <span class="grow"><b>Scanner le QR du club</b><span>À l’entrée, scanne le QR affiché pour débloquer ta soirée</span></span>
+      ${ic('chev', 22)}
+    </button>
+    <button class="action" style="margin-top:10px" data-a="ticketLink"><span class="ai lime">${ic('ticket')}</span><span class="grow"><b>Lier mon billet Shotgun</b><span class="xs muted" style="display:block">Billet pris sur Shotgun ? On le retrouve avec ton e-mail</span></span><span class="chev">${ic('chev')}</span></button>
+    <div class="section"><p class="eyebrow" style="margin-bottom:10px">Débloqué une fois dans le club</p>
+      <div class="locked">${[['glass', 'Commander au bar'], ['music', 'Proposer des sons'], ['hanger', 'Vestiaire'], ['clock', 'Suivi des commandes']].map(([i, t]) => `<div class="lk">${ic(i, 18)}<span class="grow">${t}</span>${ic('lock', 13)}</div>`).join('')}</div></div>
+    <div class="section quick">
+      <button class="tile" data-a="outings"><span class="ti">${ic('moon', 22)}</span><span><b>Mes sorties</b><span>${S.outings.length} soirée${S.outings.length > 1 ? 's' : ''}${last ? ' · ' + esc(last.club) : ''}</span></span></button>
+      <button class="tile" data-a="account"><span class="ti">${ic('user', 22)}</span><span><b>Mon compte</b><span>Infos & paiements</span></span></button>
+    </div>
+    <button class="pro-link" data-a="proLogin">${ic('lock', 13)} Je suis un club · Espace pro</button>
+  </div>`;
 }
 
 function vHome() {
   const act = activeOrders(), saved = S.orders.length * 17;
-  return `<header class="topbar"><div class="brand">Club<span>&amp;</span>Co</div>${bell()}</header>
+  const paid = S.orders.filter(o => o.status !== 'cancelled');
+  return `<header class="topbar"><div class="brand">Club<span>&amp;</span>Co</div><div class="row" style="gap:8px">${bell()}${avatarBtn()}</div></header>
   <section class="hero fade-in">
-    <span class="chip live">Live</span>
+    <span class="chip live">Dans le club</span>
     <h1 class="h1">${CLUB.name}</h1>
-    <p class="muted">Salut ${esc(S.user.name)} 👋 Profite, on gère le reste.</p>
+    <p class="muted">Salut ${esc(me())} 👋 Profite, on gère le reste.</p>
     <div class="hero-meta"><span class="chip ghost">${ic('pin', 13)} ${CLUB.area}</span><span class="chip ghost">${CLUB.event}</span><span class="chip ghost">${ic('clock', 13)} jusqu’à ${CLUB.closes}</span></div>
   </section>
-  ${act.length ? `<div class="section"><div class="section-head"><h2 class="h2">Tes commandes</h2></div>${act.map(orderLive).join('')}</div>` : ''}
-  <div class="section">${npCard()}</div>
+  ${act.length ? `<div class="section"><div class="section-head"><h2 class="h2">En cours</h2></div>${act.map(orderLive).join('')}</div>` : ''}
   <div class="section quick">
     <button class="tile lime" data-a="tab" data-tab="bar"><span class="ti">${ic('glass', 22)}</span><span><b>Commander un verre</b><span>~${CLUB.bars[S.bar].wait} min · zéro file</span></span></button>
     <button class="tile violet" data-a="tab" data-tab="music"><span class="ti">${ic('music', 22)}</span><span><b>Proposer un son</b><span>${myPending().length ? myPending().length + ' en attente du DJ' : 'Le DJ t’écoute'}</span></span></button>
-    <button class="tile" data-a="tab" data-tab="night"><span class="ti">${ic('hanger', 22)}</span><span><b>Vestiaire</b><span>${S.coat && S.coat.status !== 'done' ? '#' + S.coat.num + ' · ' + (S.coat.initials || '') : 'Déposer · 3 €'}</span></span></button>
-    <button class="tile" data-a="ticket"><span class="ti">${ic('ticket', 22)}</span><span><b>Mon entrée</b><span>${S.ticket ? 'Scannée à ' + hhmm(S.entryAt) : 'Lier mon billet Shotgun'}</span></span></button>
+    <button class="tile" data-a="tab" data-tab="night"><span class="ti">${ic('hanger', 22)}</span><span><b>Vestiaire</b><span>${S.coat && S.coat.status !== 'done' ? '#' + S.coat.num + ' · ' + esc(S.coat.initials || '') : 'Déposer · 3 €'}</span></span></button>
+    <button class="tile" data-a="tab" data-tab="orders"><span class="ti">${ic('clock', 22)}</span><span><b>Mes commandes</b><span>${paid.length ? paid.length + ' ce soir · ' + euro(paid.reduce((a, o) => a + o.total, 0)) : 'Historique de la soirée'}</span></span></button>
   </div>
   <div class="section stats">
     <div class="card stat"><p class="eyebrow">Attente au comptoir</p><p class="v">18<small> min</small></p><p class="xs muted">Avec Club&amp;Co : <b class="lime">${CLUB.bars[S.bar].wait} min</b></p></div>
     <div class="card stat"><p class="eyebrow">Affluence</p><p class="v">82<small> %</small></p><div class="meter"><i style="width:82%"></i></div></div>
   </div>
-  ${saved ? `<div class="card" style="margin-top:10px"><div class="row"><span class="lime">${ic('clock', 22)}</span><p class="small"><b>${saved} min de queue évitées</b> ce soir. Ça fait ${Math.round(saved / 3.5)} sons de plus sur la piste.</p></div></div>` : ''}
-  <div class="section"><div class="section-head"><h2 class="h2">Line-up</h2><span class="xs muted">Ce soir</span></div>
-    <div class="card timeline">${CLUB.lineup.map((l, i) => `<div class="tl ${l.now ? 'now' : i === 0 ? 'past' : ''}"><div><b>${l.n}</b><span class="xs muted">${l.s}</span></div><span class="chip ${l.now ? 'lime' : 'ghost'}">${l.now ? 'En live' : l.t}</span></div>`).join('')}</div>
-  </div>
+  ${saved ? `<div class="card" style="margin-top:10px"><div class="row"><span class="lime">${ic('clock', 22)}</span><p class="small"><b>${saved} min de queue évitées</b> ce soir. Autant de temps en plus sur la piste.</p></div></div>` : ''}
   <div class="section"><button class="safe-banner" data-a="safety">${ic('shield', 26)}<span class="grow"><b>Rentrer en sécurité</b><span class="xs muted" style="display:block">VTC, partage de trajet, alerte discrète au staff</span></span>${ic('chev')}</button></div>`;
 }
+
+const statusChip = o => ({ received: '<span class="chip warn">Reçue</span>', preparing: '<span class="chip warn">En prépa</span>', ready: '<span class="chip lime">Prête</span>', picked: '<span class="chip ghost">Récupérée</span>', cancelled: '<span class="chip bad">Remboursée</span>' })[o.status];
+function vOrders() {
+  const act = activeOrders(), paid = S.orders.filter(o => o.status !== 'cancelled');
+  const total = paid.reduce((a, o) => a + o.total, 0), items = paid.reduce((a, o) => a + o.lines.reduce((b, l) => b + l.qty, 0), 0);
+  return `${topbar('Commandes', `${CLUB.name} · ce soir`)}
+  <div class="stats fade-in"><div class="card stat"><p class="eyebrow">Dépensé au bar</p><p class="v">${euro(total)}</p></div><div class="card stat"><p class="eyebrow">Articles</p><p class="v">${items}</p></div></div>
+  ${act.length ? `<div class="section"><div class="section-head"><h2 class="h2">En cours</h2></div>${act.map(orderLive).join('')}</div>` : ''}
+  <div class="section"><div class="section-head"><h2 class="h2">Historique de la soirée</h2><span class="xs muted">${S.orders.length} commande${S.orders.length > 1 ? 's' : ''}</span></div>
+  ${S.orders.length ? S.orders.map(o => `<button class="hist" data-a="openOrder" data-id="${o.id}"><span class="hist-code">${o.code}</span><span class="grow" style="min-width:0"><b class="small">${o.lines.map(l => `${l.qty}× ${esc(l.name)}`).join(', ')}</b><span class="xs muted" style="display:block">${hhmm(o.at)} · ${o.table ? 'Table ' + esc(o.table) : CLUB.bars[o.bar].name}</span></span><span class="hist-r"><b class="small">${euro(o.status === 'cancelled' ? o.refunded : o.total)}</b>${statusChip(o)}</span></button>`).join('')
+    : `<div class="empty">Aucune commande pour l’instant.<br><button class="btn sm lime" style="margin-top:12px" data-a="tab" data-tab="bar">Commander un verre</button></div>`}
+  </div>`;
+}
+
+function vOutings() {
+  return `<button class="back-btn" data-a="back">${ic('back', 18)} Retour</button>
+  <h1 class="h1">Mes sorties</h1><p class="small muted" style="margin:6px 0 18px">Tes soirées passées avec Club&amp;Co</p>
+  ${S.outings.length ? S.outings.map(o => `<button class="outing" data-a="outing" data-id="${o.id}"><span class="outing-date">${esc(o.date)}</span><span class="grow" style="min-width:0"><b>${esc(o.club)}</b><span class="xs muted" style="display:block">${esc(o.event)} · ${o.orders.length} commande${o.orders.length > 1 ? 's' : ''} · ${o.songs} son${o.songs > 1 ? 's' : ''}</span></span><b class="small">${euro(o.spent)}</b></button>`).join('')
+    : '<div class="empty">Pas encore de sortie. Scanne le QR d’un club pour commencer !</div>'}`;
+}
+function vOuting(id) {
+  const o = S.outings.find(x => x.id === id);
+  if (!o) { S.screen = { name: 'outings' }; return vOutings(); }
+  return `<button class="back-btn" data-a="outings">${ic('back', 18)} Mes sorties</button>
+  <section class="hero fade-in"><span class="chip ghost">${esc(o.date)}</span><h1 class="h1" style="font-size:32px">${esc(o.club)}</h1><p class="muted">${esc(o.event)}${o.ticket ? ' · ' + esc(o.ticket) : ''}</p></section>
+  <div class="section stats"><div class="card stat"><p class="eyebrow">Dépensé</p><p class="v">${euro(o.spent)}</p></div><div class="card stat"><p class="eyebrow">Sons proposés</p><p class="v">${o.songs}</p></div></div>
+  <div class="section"><div class="section-head"><h2 class="h2">Commandes</h2></div>
+  ${o.orders.length ? o.orders.map(x => `<div class="hist"><span class="hist-code">${x.code}</span><span class="grow" style="min-width:0"><b class="small">${esc(x.lines)}</b><span class="xs muted" style="display:block">${x.time}</span></span><b class="small">${euro(x.total)}</b></div>`).join('') : '<div class="empty">Aucune commande</div>'}</div>
+  ${o.coat ? `<p class="xs muted" style="margin-top:14px">${ic('hanger', 13, 'style="display:inline;vertical-align:-2px"')} Vestiaire utilisé</p>` : ''}`;
+}
+
+function vAccount() {
+  const a = S.account || {}, pts = S.points, goal = 150;
+  return `<button class="back-btn" data-a="back">${ic('back', 18)} Retour</button>
+  <div class="profile-head fade-in"><span class="avatar">${esc(me()[0].toUpperCase())}</span><div><p class="h2">${esc(me())}</p><p class="small muted">Membre Club&amp;Co · ${S.outings.length} sortie${S.outings.length > 1 ? 's' : ''}</p></div></div>
+  <div class="loyalty"><div class="row between"><div><p class="eyebrow">Points fidélité</p><p class="h1" style="margin-top:6px">${pts} <span class="small muted">pts</span></p></div><span class="lime">${ic('star', 30)}</span></div>
+    <div class="meter"><i style="width:${Math.min(100, pts / goal * 100)}%"></i></div>
+    <p class="xs muted" style="margin-top:8px">${pts >= goal ? '🎉 Un cocktail offert t’attend au bar !' : `Encore ${goal - pts} pts pour un cocktail offert · 1 € = 1 pt`}</p></div>
+  <div class="section"><div class="section-head"><h2 class="h2">Mes informations</h2></div>
+    <div class="card stack">
+      <label class="lbl">Prénom<input class="field" id="ac-name" value="${esc(me())}" data-in="acName" maxlength="20" autocomplete="given-name"></label>
+      <label class="lbl">E-mail<input class="field" id="ac-email" type="email" value="${esc(a.email || '')}" data-in="acEmail" placeholder="toi@email.com" autocomplete="email"></label>
+      <label class="lbl">Téléphone<input class="field" id="ac-phone" type="tel" value="${esc(a.phone || '')}" data-in="acPhone" placeholder="06 12 34 56 78" autocomplete="tel"></label>
+      <p class="xs dim">Ton e-mail sert à retrouver tes billets Shotgun. Ton téléphone, à te prévenir par SMS si un ami t’offre un verre.</p>
+    </div></div>
+  <div class="section"><div class="section-head"><h2 class="h2">Moyens de paiement</h2></div>
+    <div class="action-list">
+      <button class="action ${S.wallet ? 'on' : ''}" data-a="toggleWallet"><span class="ai">${ic('wallet')}</span><span class="grow"><b>Paiement mobile</b><span class="xs muted" style="display:block">Validation biométrique${S.pay === 'wallet' ? ' · par défaut' : ''}</span></span><span class="switch lime-switch"></span></button>
+      ${S.cards.map(c => `<div class="action"><span class="card-ico">${c.brand}</span><span class="grow"><b>•••• ${c.last4}</b><span class="xs muted" style="display:block">Expire ${c.exp}${S.pay === c.id ? ' · par défaut' : ''}</span></span>${S.pay !== c.id ? `<button class="btn xs" data-a="defCard" data-id="${c.id}">Par défaut</button>` : ''}<button class="icon-btn" style="width:36px;height:36px" data-a="delCard" data-id="${c.id}" aria-label="Supprimer la carte">${ic('x', 16)}</button></div>`).join('')}
+      <button class="action" data-a="addCard"><span class="ai lime">${ic('plus')}</span><span class="grow"><b>Ajouter une carte</b><span class="xs muted" style="display:block">Démo : une carte de test est ajoutée</span></span></button>
+    </div></div>
+  <div class="section"><div class="section-head"><h2 class="h2">Réglages</h2></div>
+    <div class="action-list">
+      <button class="action ${S.notifOn ? 'on' : ''}" data-a="toggleNotif"><span class="ai">${ic('bell')}</span><span class="grow"><b>Notifications</b><span class="xs muted" style="display:block">${'Notification' in window ? 'Commande prête, réponse du DJ, vestiaire' : 'Installe l’app sur l’écran d’accueil pour les activer'}</span></span><span class="switch lime-switch"></span></button>
+      <button class="action" data-a="outings"><span class="ai">${ic('moon')}</span><span class="grow"><b>Mes sorties</b><span class="xs muted" style="display:block">Historique de tes soirées</span></span><span class="chev">${ic('chev')}</span></button>
+    </div></div>
+  <div class="section"><button class="btn danger block" data-a="reset">${ic('refresh', 18)} Réinitialiser la démo</button>
+    <p class="fine">Club&amp;Co · prototype v0.3 — les données restent sur ton téléphone.</p></div>`;
+}
+
+const PRO_ACCOUNTS = { 'bar@nebula': 'bar', 'dj@nebula': 'dj', 'vestiaire@nebula': 'coat' };
+const PRO_CODE = '2580';
+const sProLogin = () => `<p class="sheet-title">Espace pro</p><p class="small muted" style="margin-top:4px">Réservé au staff des clubs partenaires : barmans, DJ, vestiaire.</p>
+  <p class="opt-label">Identifiant</p><input class="field" id="pro-id" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="poste@club" value="${esc(draft.id)}" data-in="proId">
+  <p class="opt-label">Code</p><input class="field" id="pro-code" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password" placeholder="••••" data-in="proCode">
+  ${draft.err ? `<div class="warn-box err">${ic('x', 16)} ${draft.err}</div>` : ''}
+  <button class="btn lime block" style="margin-top:16px" data-a="proGo">Se connecter</button>
+  <div class="demo-creds"><p class="eyebrow">Accès démo</p><p class="small" style="margin-top:6px">bar@nebula · dj@nebula · vestiaire@nebula</p><p class="small">Code : <b>2580</b></p></div>`;
+
+const sShotgun = () => `<p class="sheet-title">Lier mon billet Shotgun</p><p class="small muted" style="margin-top:4px">On retrouve ton billet grâce à l’e-mail de ton compte Shotgun.</p>
+  <p class="opt-label">E-mail Shotgun</p><input class="field" id="sg-mail" type="email" value="${esc(draft.email)}" data-in="sgMail" placeholder="toi@email.com" autocomplete="email">
+  <button class="btn lime block" style="margin-top:14px" data-a="sgSearch">${ic('search', 18)} Rechercher mon billet</button>
+  <p class="fine">Démo : la connexion à Shotgun est simulée.</p>`;
 
 function vBar() {
   const items = MENU.filter(m => m.cat === S.cat);
@@ -451,15 +547,10 @@ function reqRow(r) {
   </div>`;
 }
 function vMusic() {
-  const tr = currentTrack(), mine = S.requests.filter(r => r.mine), act = myPending().length;
+  const mine = S.requests.filter(r => r.mine), act = myPending().length;
   const room = S.requests.filter(r => !r.mine && r.status !== 'played').sort((a, b) => (b.status === 'pending') - (a.status === 'pending') || (b.boost | 0) - (a.boost | 0) || b.votes - a.votes);
-  return `${topbar('Musique', `DJ ${CLUB.dj} en live`)}
-  <section class="np-big fade-in">
-    <div class="dj-row"><span class="avatar">${CLUB.dj[0]}</span><div class="grow"><b>${CLUB.dj}</b><p class="xs muted">${ic('wave', 12, 'style="display:inline;vertical-align:-2px"')} Synchro en direct avec les platines</p></div><span class="eq"><i></i><i></i><i></i><i></i></span></div>
-    <p class="eyebrow" style="margin-top:18px">${tr.by ? 'Demandé par ' + esc(tr.by === S.user.name ? 'toi 🔥' : tr.by) : 'En ce moment'}</p>
-    <p class="np-t" data-np-t style="margin-top:6px">${esc(tr.t)}</p><p class="muted" data-np-a>${esc(tr.a)}</p>
-    <div class="progress"><i data-np-p style="width:${(tr.p * 100).toFixed(1)}%"></i></div>
-  </section>
+  return `${topbar('Sons', `${CLUB.name} · demandes au DJ`)}
+  <section class="card dj-row fade-in"><span class="avatar">${CLUB.dj[0]}</span><div class="grow"><b>DJ ${CLUB.dj} aux platines</b><p class="xs muted">Propose un son, vote pour ceux des autres : le DJ voit tout en direct.</p></div></section>
   <div class="section">
     <div class="section-head"><h2 class="h2">Proposer un son</h2><span class="row xs muted" style="gap:8px">${act}/3 <span class="limit">${[0, 1, 2].map(i => `<i class="${i < act ? 'on' : ''}"></i>`).join('')}</span></span></div>
     <label class="search">${ic('search')}<input id="q" class="field" type="search" placeholder="Titre, artiste, style…" value="${esc(query)}" data-in="query" autocomplete="off"></label>
@@ -498,8 +589,8 @@ function vSecours() {
     <div class="row between"><b>${ic('bolt', 16, 'style="display:inline;vertical-align:-3px"')} Si ton téléphone s’éteint</b>${low ? `<span class="chip bad">Batterie ${Math.round(battery.level * 100)} %</span>` : ''}</div>
     <p class="xs muted" style="margin:4px 0 10px">Retiens ça (ou fais une capture) — le staff peut tout retrouver sans ton téléphone.</p>
     ${c ? `<div class="sec-row"><span>Vestiaire</span><b>#${c.num} · ${esc(c.initials)}${c.desc ? ' · ' + esc(c.desc) : ''}</b></div>` : ''}
-    ${act.map(o => `<div class="sec-row"><span>Commande</span><b>${o.code} · au nom de ${esc(S.user.name)}</b></div>`).join('')}
-    <div class="sec-row"><span>Entrée</span><b>${esc(S.user.name)} · sur la liste du soir</b></div>
+    ${act.map(o => `<div class="sec-row"><span>Commande</span><b>${o.code} · au nom de ${esc(me())}</b></div>`).join('')}
+    <div class="sec-row"><span>Entrée</span><b>${esc(me())} · sur la liste du soir</b></div>
   </div></div>`;
 }
 function vTicketCard() {
@@ -513,7 +604,7 @@ function vTicketCard() {
       <p class="h1" style="font-size:24px;margin-top:14px">${CLUB.event}</p><p class="small muted">${CLUB.name} · ${CLUB.area} · Jeu. 5 nov.</p>
       <p class="xs muted" style="margin-top:8px">Billet ${esc(tk.src)} · ${esc(tk.type)} · réf. ${esc(tk.ref)}</p></div>
     <div class="ticket-cut"></div>
-    <div class="ticket-bottom"><div class="qr">${qr('entry' + S.user.name)}</div><div><p class="eyebrow">Pass sortie / retour</p><p><b>${esc(S.user.name)}</b></p><p class="xs muted" style="margin-top:6px">Valable jusqu’à 03:00.</p>
+    <div class="ticket-bottom"><div class="qr">${qr('entry' + me())}</div><div><p class="eyebrow">Pass sortie / retour</p><p><b>${esc(me())}</b></p><p class="xs muted" style="margin-top:6px">Valable jusqu’à 03:00.</p>
       ${tk.src === 'Shotgun' ? `<a class="xs lime" style="display:inline-block;margin-top:8px;font-weight:700" href="https://shotgun.live" target="_blank" rel="noopener">Ouvrir dans Shotgun ↗</a>` : ''}</div></div>
   </div>`;
 }
@@ -535,31 +626,9 @@ function vNight() {
       <button class="action" data-a="shareTrip"><span class="ai">${ic('share')}</span><span><b>Partager mon trajet</b><span class="xs muted" style="display:block">Un proche suit ton retour en direct</span></span><span class="chev">${ic('chev')}</span></button>
       <button class="action alert" data-a="help"><span class="ai">${ic('shield')}</span><span><b>Besoin d’aide, discrètement</b><span class="xs muted" style="display:block">Alerte la sécurité du club sans attirer l’attention</span></span><span class="chev">${ic('chev')}</span></button>
     </div></div>
-  ${S.orders.length ? `<div class="section"><div class="section-head"><h2 class="h2">Historique</h2></div>${S.orders.map(o => `<button class="action" style="margin-bottom:8px" data-a="openOrder" data-id="${o.id}"><span class="ai mono" style="font-family:var(--font-d);font-weight:700">${o.code}</span><span class="grow"><b>${o.lines.map(l => `${l.qty}× ${esc(l.name)}`).join(', ')}</b><span class="xs muted" style="display:block">${hhmm(o.at)} · ${euro(o.total)} · ${STATUS[o.status].t}</span></span></button>`).join('')}</div>` : ''}`;
+  <div class="section"><button class="btn block" data-a="endNight">${ic('moon', 18)} Terminer ma soirée</button><p class="fine">Ta soirée sera rangée dans « Mes sorties ».</p></div>`;
 }
 
-function vProfile() {
-  const pts = S.points, goal = 150;
-  return `${topbar('Profil', 'Ton compte')}
-  <div class="profile-head fade-in"><span class="avatar">${esc(S.user.name[0].toUpperCase())}</span><div><p class="h2">${esc(S.user.name)}</p><p class="small muted">Membre Club&amp;Co · Night Owl</p></div></div>
-  <div class="loyalty"><div class="row between"><div><p class="eyebrow">Points fidélité</p><p class="h1" style="margin-top:6px">${pts} <span class="small muted">pts</span></p></div><span class="lime">${ic('star', 30)}</span></div>
-    <div class="meter"><i style="width:${Math.min(100, pts / goal * 100)}%"></i></div>
-    <p class="xs muted" style="margin-top:8px">${pts >= goal ? '🎉 Un cocktail offert t’attend au bar !' : `Encore ${goal - pts} pts pour un cocktail offert · 1 € = 1 pt`}</p></div>
-  <div class="section"><div class="section-head"><h2 class="h2">Réglages</h2></div>
-    <div class="action-list">
-      <button class="action ${S.notifOn ? 'on' : ''}" data-a="toggleNotif"><span class="ai">${ic('bell')}</span><span class="grow"><b>Notifications</b><span class="xs muted" style="display:block">${'Notification' in window ? 'Commande prête, réponse du DJ, vestiaire' : 'Installe l’app sur l’écran d’accueil pour les activer'}</span></span><span class="switch lime-switch"></span></button>
-      <div class="action"><span class="ai">${ic('wallet')}</span><span class="grow"><b>Paiement</b><span class="xs muted" style="display:block">Paiement mobile · Carte •••• 4242</span></span><span class="chip ghost">Démo</span></div>
-    </div></div>
-  <div class="section"><div class="section-head"><h2 class="h2">Espace pro <span class="tag">Démo</span></h2></div>
-    <p class="small muted" style="margin-bottom:10px">Mets-toi à la place du staff pour voir l’autre côté de l’app.</p>
-    <div class="action-list">
-      <button class="action" data-a="pro" data-mode="bar"><span class="ai lime">${ic('glass')}</span><span class="grow"><b>Vue barman</b><span class="xs muted" style="display:block">File des commandes, préparation, remise</span></span><span class="chev">${ic('chev')}</span></button>
-      <button class="action" data-a="pro" data-mode="dj"><span class="ai violet">${ic('headphones')}</span><span class="grow"><b>Vue DJ</b><span class="xs muted" style="display:block">Accepter ou refuser les demandes de sons</span></span><span class="chev">${ic('chev')}</span></button>
-      <button class="action" data-a="pro" data-mode="coat"><span class="ai">${ic('hanger')}</span><span class="grow"><b>Vue vestiaire</b><span class="xs muted" style="display:block">Retrouver un ticket par numéro + initiales</span></span><span class="chev">${ic('chev')}</span></button>
-    </div></div>
-  <div class="section"><button class="btn danger block" data-a="reset">${ic('refresh', 18)} Réinitialiser la démo</button>
-    <p class="fine">Club&amp;Co · prototype v0.1 — les données restent sur ton téléphone.</p></div>`;
-}
 
 function vOrder(id) {
   const o = S.orders.find(x => x.id === id);
@@ -593,10 +662,10 @@ function vOrder(id) {
 /* ---------- Vues : espace pro ---------- */
 function proBanner(kind) {
   const k = { bar: ['glass', 'BARMAN'], dj: ['headphones', 'DJ'], coat: ['hanger', 'VESTIAIRE'] }[kind];
-  return `<div class="pro-banner ${kind === 'dj' ? '' : 'bar'}"><span>${ic(k[0], 16, 'style="display:inline;vertical-align:-3px"')}&nbsp; ESPACE PRO · ${k[1]} (démo)</span><button data-a="exitPro">Quitter</button></div>`;
+  return `<div class="pro-banner ${kind === 'dj' ? '' : 'bar'}"><span>${ic(k[0], 16, 'style="display:inline;vertical-align:-3px"')}&nbsp; ${k[1]} · ${esc(S.proUser || '')}</span><button data-a="proLogout">Déconnexion</button></div>`;
 }
 function vProBar() {
-  const all = [...S.orders.filter(o => o.status !== 'picked').map(o => ({ ...o, mine: true, who: S.user.name })), ...S.fakeOrders.filter(o => o.status !== 'picked')];
+  const all = [...S.orders.filter(o => o.status !== 'picked').map(o => ({ ...o, mine: true, who: me() })), ...S.fakeOrders.filter(o => o.status !== 'picked')];
   const col = (st, title) => {
     const list = all.filter(o => o.status === st);
     return `<div class="col-title"><h2 class="h2">${title}</h2><span class="n">${list.length}</span></div>${list.length ? list.map(o => `
@@ -616,23 +685,20 @@ function vProDJ() {
   const pending = S.requests.filter(r => r.status === 'pending').sort((a, b) => (b.boost | 0) - (a.boost | 0) || b.votes - a.votes);
   const queue = S.requests.filter(r => r.status === 'accepted');
   const tips = S.requests.filter(r => r.boost && r.status !== 'declined').length * 3;
-  const tr = currentTrack();
   return `${proBanner('dj')}
   <h1 class="h1">Demandes</h1><p class="small muted" style="margin:6px 0 16px">Triées par boost puis par votes de la salle</p>
-  <div class="card np"><span class="np-art"><span class="eq"><i></i><i></i><i></i><i></i></span></span><span class="grow"><span class="eyebrow">Sur les platines</span><span class="np-t" data-np-t style="display:block">${esc(tr.t)}</span><span class="muted small" data-np-a>${esc(tr.a)}</span><span class="progress"><i data-np-p></i></span></span></div>
   <div class="action-list" style="margin-top:10px">
-    <div class="action"><span class="ai violet">${ic('wave')}</span><span class="grow"><b>Platines connectées</b><span class="xs muted" style="display:block">CDJ via Pro DJ Link · titres détectés automatiquement</span></span><span class="chip ok">Live</span></div>
-    <button class="action ${S.djHide ? 'on' : ''}" data-a="djHide"><span class="ai violet">${ic('x')}</span><span class="grow"><b>Mode ID</b><span class="xs muted" style="display:block">Masquer le titre en cours dans l’app</span></span><span class="switch"></span></button>
+    <div class="action"><span class="ai violet">${ic('wave')}</span><span class="grow"><b>Platines connectées</b><span class="xs muted" style="display:block">Titres détectés auto → demandes marquées « Jouée »</span></span><span class="chip ok">Live</span></div>
   </div>
   <div class="kpis" style="margin-top:10px"><div class="kpi"><p class="eyebrow">En attente</p><p class="v">${pending.length}</p></div><div class="kpi"><p class="eyebrow">Dans la file</p><p class="v">${queue.length}</p></div><div class="kpi"><p class="eyebrow">Pourboires</p><p class="v">${tips}€</p></div></div>
   <div class="col-title"><h2 class="h2">À traiter</h2><span class="n">${pending.length}</span></div>
   ${pending.length ? pending.map(r => `<div class="ticket-order ${r.mine ? 'mine' : ''}">
-    <div class="row"><span class="cover" style="--h:${trackHue(r.t)}">${initials(r.t)}</span><div class="grow" style="min-width:0"><p class="t-name">${esc(r.t)} ${r.boost ? '<span class="tag">Boost</span>' : ''}</p><p class="t-sub">${esc(r.a)} · ${r.mine ? esc(S.user.name) : esc(r.by)} · ${ago(r.at)}</p></div><span class="vote on">${ic('heart', 16)}${r.votes}</span></div>
+    <div class="row"><span class="cover" style="--h:${trackHue(r.t)}">${initials(r.t)}</span><div class="grow" style="min-width:0"><p class="t-name">${esc(r.t)} ${r.boost ? '<span class="tag">Boost</span>' : ''}</p><p class="t-sub">${esc(r.a)} · ${r.mine ? esc(me()) : esc(r.by)} · ${ago(r.at)}</p></div><span class="vote on">${ic('heart', 16)}${r.votes}</span></div>
     ${r.msg ? `<p class="req-reason" style="margin:8px 0 0">💬 ${esc(r.msg)}</p>` : ''}
     <div class="row" style="margin-top:12px;gap:8px"><button class="btn sm danger grow" data-a="djDecline" data-id="${r.id}">${ic('x', 16)} Refuser</button><button class="btn sm violet grow" data-a="djAccept" data-id="${r.id}">${ic('check', 16)} Accepter</button></div>
   </div>`).join('') : `<div class="empty">Aucune demande en attente</div>`}
   <div class="col-title"><h2 class="h2">Ma file</h2><span class="n">${queue.length}</span></div>
-  ${queue.length ? queue.map(r => `<div class="ticket-order"><div class="row"><span class="cover" style="--h:${trackHue(r.t)}">${initials(r.t)}</span><div class="grow" style="min-width:0"><p class="t-name">${esc(r.t)}</p><p class="t-sub">${esc(r.a)} · ${r.mine ? esc(S.user.name) : esc(r.by)}</p></div><button class="btn xs lime" data-a="djPlay" data-id="${r.id}">${ic('wave', 14)} Jouer</button></div></div>`).join('') : `<div class="empty">File vide</div>`}`;
+  ${queue.length ? queue.map(r => `<div class="ticket-order"><div class="row"><span class="cover" style="--h:${trackHue(r.t)}">${initials(r.t)}</span><div class="grow" style="min-width:0"><p class="t-name">${esc(r.t)}</p><p class="t-sub">${esc(r.a)} · ${r.mine ? esc(me()) : esc(r.by)}</p></div><button class="btn xs lime" data-a="djPlay" data-id="${r.id}">${ic('wave', 14)} Jouer</button></div></div>`).join('') : `<div class="empty">File vide</div>`}`;
 }
 
 let coatQ = '';
@@ -647,7 +713,7 @@ function coatListHTML() {
     ready: `<button class="btn sm block" data-a="proCoat" data-id="${c.id}" data-st="done">Rendu au client</button>`,
   })[c.status];
   return list.length ? list.map(c => `<div class="ticket-order ${c.mine ? 'mine' : ''}"><div class="row between"><span class="code">#${c.num} · ${esc(c.initials || '—')}</span>${coatChip(c)}</div>
-    <p class="small muted" style="margin:6px 0 12px">${c.items} article${c.items > 1 ? 's' : ''}${c.desc ? ' · ' + esc(c.desc) : ''}${c.mine ? ' · ' + esc(S.user.name) : ''}</p>${btn(c)}</div>`).join('')
+    <p class="small muted" style="margin:6px 0 12px">${c.items} article${c.items > 1 ? 's' : ''}${c.desc ? ' · ' + esc(c.desc) : ''}${c.mine ? ' · ' + esc(me()) : ''}</p>${btn(c)}</div>`).join('')
     : '<div class="empty">Aucun ticket ne correspond</div>';
 }
 function vProCoat() {
@@ -660,7 +726,26 @@ function vProCoat() {
 /* ---------- Sheets ---------- */
 let sheetFn = null, draft = null;
 function openSheet(fn) { sheetFn = fn; $('.sheet-body').innerHTML = fn(); $('#sheet').classList.add('open'); $('#sheet').setAttribute('aria-hidden', 'false'); $('.sheet').scrollTop = 0; }
-function closeSheet() { sheetFn = null; $('#sheet').classList.remove('open'); $('#sheet').setAttribute('aria-hidden', 'true'); }
+let camStream = null, scanTimer = null, scanning = false;
+function startCam() {
+  scanning = true;
+  if (!navigator.mediaDevices?.getUserMedia) return;
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(st => {
+    if (!scanning) return st.getTracks().forEach(t => t.stop());
+    camStream = st; const v = $('#cam'); if (v) { v.srcObject = st; v.play().catch(() => {}); v.classList.add('on'); }
+  }).catch(() => {});
+}
+function stopCam() { scanning = false; clearTimeout(scanTimer); if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; } }
+function checkIn(via) {
+  stopCam();
+  const t = now();
+  S.checkedIn = { via, at: t }; S.entryAt = t; S.tab = 'home'; S.screen = null;
+  if (!S.ticket) S.ticket = { src: 'Entrée sur place', type: 'Billet porte', ref: 'NB-' + Math.random().toString(36).slice(2, 8).toUpperCase() };
+  if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
+  closeSheet(); save(); render();
+  notify(`Bienvenue au ${CLUB.name} ✨`, 'Bar, sons, vestiaire : tout est débloqué.', { go: 'home', soft: true });
+}
+function closeSheet() { stopCam(); sheetFn = null; $('#sheet').classList.remove('open'); $('#sheet').setAttribute('aria-hidden', 'true'); }
 function refreshSheet() { if (sheetFn) keepFocus(() => { $('.sheet-body').innerHTML = sheetFn(); }); }
 
 function sItem() {
@@ -686,14 +771,15 @@ function sCart() {
   <div class="options cols">${[0, 5, 10].map(p => `<button class="opt ${S.tip === p ? 'on' : ''}" data-a="tip" data-v="${p}">${p ? p + ' %' : 'Non merci'}</button>`).join('')}</div>
   <p class="opt-label">Paiement</p>
   <div class="options">
-    <button class="pay-method ${S.pay === 'wallet' ? 'on' : ''}" data-a="payM" data-v="wallet"><span class="card-ico wallet">${ic('wallet', 14)}</span><span class="grow"><b class="small">Paiement mobile</b><span class="xs muted" style="display:block">Validation biométrique</span></span><span class="radio"></span></button>
-    <button class="pay-method ${S.pay === 'card' ? 'on' : ''}" data-a="payM" data-v="card"><span class="card-ico">VISA</span><span class="grow"><b class="small">Carte •••• 4242</b><span class="xs muted" style="display:block">Enregistrée</span></span><span class="radio"></span></button>
+    ${S.wallet ? `<button class="pay-method ${S.pay === 'wallet' ? 'on' : ''}" data-a="payM" data-v="wallet"><span class="card-ico wallet">${ic('wallet', 14)}</span><span class="grow"><b class="small">Paiement mobile</b><span class="xs muted" style="display:block">Validation biométrique</span></span><span class="radio"></span></button>` : ''}
+    ${S.cards.map(c => `<button class="pay-method ${S.pay === c.id ? 'on' : ''}" data-a="payM" data-v="${c.id}"><span class="card-ico">${c.brand}</span><span class="grow"><b class="small">Carte •••• ${c.last4}</b><span class="xs muted" style="display:block">Expire ${c.exp}</span></span><span class="radio"></span></button>`).join('')}
+    ${!S.wallet && !S.cards.length ? `<button class="pay-method" data-a="account"><span class="ai lime">${ic('plus', 16)}</span><span class="grow"><b class="small">Ajouter un moyen de paiement</b></span></button>` : ''}
   </div>
   <div class="totals"><div class="row"><span class="muted">Sous-total</span><span>${euro(sub)}</span></div>${tip ? `<div class="row"><span class="muted">Pourboire</span><span>${euro(tip)}</span></div>` : ''}<div class="row"><span class="muted">Frais de service</span><span class="lime">Offerts</span></div><div class="row grand"><span>Total</span><span>${euro(tot)}</span></div></div>
   ${over ? `<div class="warn-box">${ic('wallet', 18)} Cette commande te fait dépasser ton budget de ${S.budget} €.</div>` : ''}
   <p class="xs muted" style="margin-top:12px">+${Math.floor(tot)} pts fidélité · ${table ? 'servi à ta table' : `à retirer au ${CLUB.bars[S.bar].name}`}</p>
   ${S.barPaused ? `<div class="warn-box">${ic('clock', 18)} Le bar fait une courte pause (rush). Réessaie dans quelques minutes.</div>` : ''}
-  <button class="btn lime block" style="margin-top:14px;height:60px" data-a="pay" ${S.barPaused ? 'disabled' : ''}>${ic(S.pay === 'wallet' ? 'wallet' : 'card', 20)} Payer ${euro(tot)}</button>`;
+  <button class="btn lime block" style="margin-top:14px;height:60px" data-a="pay" ${S.barPaused || !payOk() ? 'disabled' : ''}>${ic(S.pay === 'wallet' ? 'wallet' : 'card', 20)} Payer ${euro(tot)}</button>`;
 }
 const sPaying = (done, msg = 'Ta commande part au bar') => `<div class="paying"><div>${done ? `<div class="done-check">${ic('check', 54)}</div><p class="sheet-title">Paiement accepté</p><p class="small muted" style="margin-top:6px">${msg}</p>` : `<div class="ring"></div><p class="sheet-title">Validation…</p><p class="small muted" style="margin-top:6px">Paiement sécurisé (simulation)</p>`}</div></div>`;
 
@@ -723,18 +809,12 @@ function sCoat() {
   <div class="sheet-actions"><div class="stepper lg"><button data-a="cItems" data-v="-1" aria-label="Moins">${ic('minus')}</button><span>${draft.items}</span><button data-a="cItems" data-v="1" aria-label="Plus">${ic('plus')}</button></div>
     <button class="btn lime grow" data-a="coatPay">Payer <span class="price">${euro(3 * draft.items)}</span></button></div>`;
 }
-const sTicketLink = () => `<p class="sheet-title">Lier mon billet</p><p class="small muted" style="margin-top:4px">Retrouve ici le billet que tu as acheté pour ${CLUB.event}.</p>
-  <div class="action-list" style="margin-top:16px">
-    <button class="action" data-a="linkGo" data-v="shotgun"><span class="ai lime">${ic('ticket')}</span><span class="grow"><b>Connecter mon compte Shotgun</b><span class="xs muted" style="display:block">On retrouve ton billet avec ton e-mail</span></span><span class="chev">${ic('chev')}</span></button>
-    <button class="action" data-a="linkGo" data-v="scan"><span class="ai">${ic('qr')}</span><span class="grow"><b>Scanner le QR de mon billet</b><span class="xs muted" style="display:block">Depuis une capture d’écran ou ton Wallet</span></span><span class="chev">${ic('chev')}</span></button>
-    <button class="action" data-a="linkGo" data-v="list"><span class="ai">${ic('users')}</span><span class="grow"><b>Je suis sur la guest list</b><span class="xs muted" style="display:block">Le club vérifie ton nom</span></span><span class="chev">${ic('chev')}</span></button>
-  </div><p class="fine">Démo : la liaison est simulée.</p>`;
 const ISSUES = [['Il manque un article', 'le bar te le prépare en priorité'], ['Ce n’est pas ma boisson', 'on te refait la bonne en priorité'], ['Boisson renversée / ratée', 'on te la refait, offerte'], ['Je n’ai rien reçu', 'un responsable bar arrive, remboursement si besoin']];
 const sIssue = id => `<p class="sheet-title">Un souci ?</p><p class="small muted" style="margin:4px 0 14px">Le bar reçoit ton signalement avec le détail de ta commande.</p>
   <div class="options">${ISSUES.map(([r], i) => `<button class="opt" data-a="issueGo" data-id="${id}" data-v="${i}">${r}${ic('chev', 18)}</button>`).join('')}</div>`;
 const sTicket = () => `<p class="sheet-title">Mon entrée</p><p class="small muted" style="margin-top:4px">${CLUB.event} · ${CLUB.name}</p>
-  <div class="qr" style="width:220px;height:220px;margin:22px auto">${qr('entry' + S.user.name)}</div>
-  <p class="center small" style="text-align:center"><b>${esc(S.user.name)}</b> · Entrée validée à ${hhmm(S.entryAt)}</p>
+  <div class="qr" style="width:220px;height:220px;margin:22px auto">${qr('entry' + me())}</div>
+  <p class="center small" style="text-align:center"><b>${esc(me())}</b> · Entrée validée à ${hhmm(S.entryAt)}</p>
   <p class="fine">Présente ce QR à la sécurité pour sortir et revenir (jusqu’à 03:00).</p>`;
 const sSafety = () => `<p class="sheet-title">Rentrer en sécurité</p><p class="small muted" style="margin:4px 0 16px">Parce qu’une bonne soirée se termine bien.</p>
   <div class="action-list">
@@ -778,12 +858,14 @@ function render() {
   keepFocus(() => {
     const view = $('#view');
     let html, key;
-    if (!S.user) { html = vOnboarding(); key = 'onb'; }
-    else if (S.pro) { html = ({ bar: vProBar, dj: vProDJ, coat: vProCoat }[S.pro] || vProBar)(); key = 'pro' + S.pro; }
-    else if (S.screen) { html = vOrder(S.screen.id); key = 'order' + S.screen.id; }
-    else { html = ({ home: vHome, bar: vBar, music: vMusic, night: vNight, profile: vProfile }[S.tab] || vHome)(); key = S.tab; }
+    const sc = S.screen;
+    if (S.pro) { html = ({ bar: vProBar, dj: vProDJ, coat: vProCoat }[S.pro] || vProBar)(); key = 'pro' + S.pro; }
+    else if (!S.user) { html = vOnboarding(); key = 'onb'; }
+    else if (sc) { html = sc.name === 'order' ? vOrder(sc.id) : sc.name === 'account' ? vAccount() : sc.name === 'outings' ? vOutings() : vOuting(sc.id); key = sc.name + (sc.id || ''); }
+    else if (!S.checkedIn) { html = vLobby(); key = 'lobby'; }
+    else { html = ({ home: vHome, bar: vBar, music: vMusic, orders: vOrders, night: vNight }[S.tab] || vHome)(); key = S.tab; }
     view.innerHTML = html;
-    const showNav = S.user && !S.pro;
+    const showNav = !!(S.user && !S.pro && S.checkedIn && (!sc || sc.name === 'order'));
     const showCart = showNav && !S.screen && S.tab === 'bar' && S.cart.length > 0;
     view.className = !showNav ? 'no-nav' : showCart ? 'with-cart' : '';
     if (key !== lastKey) { $('#scroll').scrollTop = 0; lastKey = key; }
@@ -796,7 +878,7 @@ function render() {
 function renderNav(show) {
   const nav = $('#nav'); nav.classList.toggle('hide', !show);
   if (!show) return;
-  const act = activeOrders().length, tabs = [['home', 'Accueil', 'home'], ['bar', 'Bar', 'glass', act], ['music', 'Musique', 'music', myPending().length], ['night', 'Soirée', 'moon'], ['profile', 'Profil', 'user']];
+  const act = activeOrders().length, tabs = [['home', 'Club', 'home'], ['bar', 'Bar', 'glass'], ['music', 'Sons', 'music', myPending().length], ['orders', 'Commandes', 'clock', act], ['night', 'Soirée', 'moon']];
   nav.innerHTML = tabs.map(([k, l, i, b]) => `<button class="${S.tab === k && !S.screen ? 'on' : ''}" data-a="tab" data-tab="${k}"><span class="ni">${ic(i, 21)}</span>${l}${b ? `<span class="badge">${b}</span>` : ''}</button>`).join('');
 }
 let lastCount = 0;
@@ -817,10 +899,68 @@ function go(target) {
 /* ---------- Actions ---------- */
 const A = {
   enter() {
+    const name = ($('#onb-name').value || '').trim();
+    if (!name) { flash('Indique ton prénom'); return $('#onb-name').focus(); }
     if (!$('#onb-age').checked) return flash('Coche la case : Club&Co est réservé aux 18 ans et plus');
-    const name = ($('#onb-name').value || '').trim() || 'Toi';
-    S.user = { name: name.charAt(0).toUpperCase() + name.slice(1) }; S.tab = 'home'; save(); render();
-    setTimeout(() => notify(`Bienvenue au ${CLUB.name} ✨`, 'Ta soirée est prête : commande, propose tes sons, profite.', { go: 'home', soft: true }), 900);
+    S.user = { name: name.charAt(0).toUpperCase() + name.slice(1) };
+    S.account = { email: ($('#onb-email').value || '').trim(), phone: '' };
+    S.screen = null; save(); render();
+  },
+  scan() {
+    openSheet(() => `<p class="sheet-title">Scanner le QR du club</p><p class="small muted" style="margin-top:4px">Vise le QR code affiché à l’entrée du club.</p>
+      <div class="viewfinder"><video id="cam" playsinline muted></video><div class="vf-qr">${qr('club-nebula')}</div><i class="c1"></i><i class="c2"></i><i class="c3"></i><i class="c4"></i><span class="laser"></span></div>
+      <p class="fine">Démo : la détection du QR est simulée.</p>`);
+    startCam();
+    scanTimer = setTimeout(() => checkIn('qr'), 3000);
+  },
+  ticketLink: () => { draft = { email: (S.account && S.account.email) || '' }; openSheet(sShotgun); },
+  sgSearch() {
+    if (!/^\S+@\S+\.\S+$/.test(draft.email.trim())) { flash('Entre l’e-mail de ton compte Shotgun'); return $('#sg-mail')?.focus(); }
+    sheetFn = null;
+    $('.sheet-body').innerHTML = `<div class="paying"><div><div class="ring"></div><p class="sheet-title">Recherche de ton billet…</p><p class="small muted" style="margin-top:6px">${esc(draft.email)}</p></div></div>`;
+    setTimeout(() => {
+      $('.sheet-body').innerHTML = `<p class="sheet-title">Billet trouvé 🎉</p>
+        <div class="found"><div class="row between"><span class="chip ok">${ic('check', 12)} Shotgun</span><span class="xs muted">Ce soir</span></div>
+          <p class="h2" style="margin-top:12px">${CLUB.event}</p><p class="small muted">${CLUB.name} · ${CLUB.area}</p>
+          <div class="sec-row" style="margin-top:12px"><span>Billet</span><b>Early Bird · 15 €</b></div><div class="sec-row"><span>Statut</span><b class="lime">Scanné à l’entrée · ${hhmm(now())}</b></div></div>
+        <button class="btn lime block" style="margin-top:16px" data-a="sgEnter">Entrer dans la soirée ${ic('chev', 18)}</button>`;
+    }, 1500);
+  },
+  sgEnter() {
+    S.ticket = { src: 'Shotgun', type: 'Early Bird · 15 €', ref: 'SG-' + Math.random().toString(36).slice(2, 8).toUpperCase() };
+    if (S.account && !S.account.email) S.account.email = draft.email.trim();
+    checkIn('shotgun');
+  },
+  account: () => { closeSheet(); S.screen = { name: 'account' }; save(); render(); },
+  outings: () => { S.screen = { name: 'outings' }; save(); render(); },
+  outing: d => { S.screen = { name: 'outing', id: d.id }; save(); render(); },
+  toggleWallet() { S.wallet = !S.wallet; if (!S.wallet && S.pay === 'wallet') S.pay = S.cards[0]?.id || null; if (S.wallet && !payOk()) S.pay = 'wallet'; save(); render(); },
+  addCard() {
+    const brand = pick(['VISA', 'MC', 'AMEX']), id = 'c' + uid();
+    S.cards.push({ id, brand, last4: String(1000 + Math.floor(Math.random() * 9000)), exp: `0${1 + Math.floor(Math.random() * 9)}/2${8 + Math.floor(Math.random() * 2)}` });
+    if (!payOk()) S.pay = id;
+    save(); render(); flash('Carte de test ajoutée');
+  },
+  delCard: d => { if (!confirm('Supprimer cette carte ?')) return; S.cards = S.cards.filter(c => c.id !== d.id); if (!payOk()) S.pay = S.wallet ? 'wallet' : (S.cards[0]?.id || null); save(); render(); },
+  defCard: d => { S.pay = d.id; save(); render(); },
+  proLogin: () => { draft = { id: '', code: '', err: '' }; openSheet(sProLogin); },
+  proGo() {
+    const id = draft.id.trim().toLowerCase(), role = PRO_ACCOUNTS[id];
+    if (!role || draft.code !== PRO_CODE) { draft.err = 'Identifiant ou code incorrect'; draft.code = ''; refreshSheet(); return; }
+    S.pro = role; S.proUser = id; closeSheet(); save(); render(); flash(`Connecté · ${id}`);
+  },
+  proLogout: () => { S.pro = null; S.proUser = null; save(); render(); },
+  endNight() {
+    if (activeOrders().length) return flash('Tu as encore une commande en cours au bar');
+    if (S.coat && S.coat.status !== 'done') return flash(`N’oublie pas ton vestiaire : #${S.coat.num} · ${S.coat.initials || ''}`);
+    if (!confirm('Terminer ta soirée ? Elle sera rangée dans « Mes sorties ».')) return;
+    S.outings.unshift({
+      id: uid(), club: CLUB.name, event: CLUB.event, spent: spent(), songs: S.requests.filter(r => r.mine).length, coat: !!S.coat, ticket: S.ticket?.src || '',
+      date: new Date().toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }),
+      orders: S.orders.filter(o => o.status !== 'cancelled').map(o => ({ code: o.code, time: hhmm(o.at), lines: o.lines.map(l => `${l.qty}× ${l.name}`).join(' · '), total: o.total })),
+    });
+    const keep = ['user', 'account', 'cards', 'wallet', 'pay', 'outings', 'points', 'notifOn', 'budget'].reduce((o, k) => ({ ...o, [k]: S[k] }), {});
+    S = { ...seed(), ...keep }; save(); render(); flash('Soirée terminée — rentre bien 🌙');
   },
   tab: d => { S.tab = d.tab; S.screen = null; save(); render(); },
   cat: d => { S.cat = d.cat; save(); render(); },
@@ -865,7 +1005,7 @@ const A = {
   sendReq() {
     const tr = draft.track;
     if (S.requests.some(r => r.t.toLowerCase() === tr.t.toLowerCase() && ['pending', 'accepted'].includes(r.status))) { closeSheet(); return flash('Déjà demandé — vote pour lui dans la liste ❤️'); }
-    const r = { id: uid(), t: tr.t, a: tr.a, by: S.user.name, mine: true, votes: 1, voted: false, status: 'pending', boost: !!draft.boost, msg: clean(draft.msg.trim()), at: now(), respondAt: now() + (draft.boost ? 9000 : 14000 + Math.random() * 8000) };
+    const r = { id: uid(), t: tr.t, a: tr.a, by: me(), mine: true, votes: 1, voted: false, status: 'pending', boost: !!draft.boost, msg: clean(draft.msg.trim()), at: now(), respondAt: now() + (draft.boost ? 9000 : 14000 + Math.random() * 8000) };
     S.requests.unshift(r);
     if (r.boost) S.extras.push({ ref: r.id, label: 'Boost DJ', amount: 3 });
     askNotif(); query = ''; closeSheet(); save(); render();
@@ -874,18 +1014,7 @@ const A = {
   vote: (d, e) => { e.stopPropagation(); const r = S.requests.find(x => x.id === d.id); if (!r || r.mine) return; r.voted = !r.voted; r.votes += r.voted ? 1 : -1; if (navigator.vibrate) navigator.vibrate(15); save(); render(); },
   notifs: () => { openSheet(sNotifs); save(); render(); },
   goNotif: d => { const n = S.notifs.find(x => x.id === d.id); closeSheet(); if (n && n.go) go(n.go); },
-  ticket: () => openSheet(S.ticket ? sTicket : sTicketLink),
-  ticketLink: () => openSheet(sTicketLink),
-  linkGo(d) {
-    sheetFn = null;
-    $('.sheet-body').innerHTML = `<div class="paying"><div><div class="ring"></div><p class="sheet-title">${d.v === 'list' ? 'Vérification de la liste…' : 'Recherche de ton billet…'}</p></div></div>`;
-    setTimeout(() => {
-      const ref = Math.random().toString(36).slice(2, 8).toUpperCase();
-      S.ticket = d.v === 'list' ? { src: 'Guest list', type: 'Invitation', ref: 'GL-' + ref } : { src: 'Shotgun', type: 'Early Bird · 15 €', ref: 'SG-' + ref };
-      closeSheet(); save(); render();
-      notify('Billet lié ✅', `${S.ticket.src} · ${S.ticket.type} — scanné à l’entrée à ${hhmm(S.entryAt)}`, { go: 'night', soft: true });
-    }, 1500);
-  },
+  ticket: () => openSheet(sTicket),
   cancelOrder(d) {
     const o = S.orders.find(x => x.id === d.id);
     if (!o || o.status !== 'received') return flash('Trop tard, le bar a déjà commencé ta commande');
@@ -901,7 +1030,6 @@ const A = {
     notify('Signalement envoyé', `${o.code} · ${fix}`, { go: 'order:' + o.id, soft: true });
   },
   barPause: () => { S.barPaused = !S.barPaused; save(); render(); flash(S.barPaused ? 'Commandes en pause — les clients sont prévenus' : 'Commandes réouvertes'); },
-  djHide: () => { S.djHide = !S.djHide; save(); render(); },
   proCoat(d) { const c = d.id === 'mine' ? S.coat : S.fakeCoats.find(x => x.id === d.id); if (!c) return; setCoat(c, d.st); save(); render(); },
   safety: () => openSheet(sSafety),
   safeRide: () => { closeSheet(); flash('🚗 Ouverture de ton appli VTC (démo)'); },
@@ -912,7 +1040,7 @@ const A = {
   },
   help: () => openSheet(sHelp),
   sendHelp: d => { closeSheet(); if (navigator.vibrate) navigator.vibrate(30); notify('Alerte envoyée 🛡️', `Un agent arrive · ${d.v} · ≈ 2 min. Reste où tu es.`, { soft: true }); },
-  coatDeposit() { draft = { initials: S.user.name.replace(/[^A-Za-z]/g, '').slice(0, 1).toUpperCase(), desc: '', items: 1 }; openSheet(sCoat); },
+  coatDeposit() { draft = { initials: me().replace(/[^A-Za-z]/g, '').slice(0, 1).toUpperCase(), desc: '', items: 1 }; openSheet(sCoat); },
   cItems: d => { draft.items = Math.max(1, Math.min(4, draft.items + +d.v)); refreshSheet(); },
   coatPay() {
     if (!/^[A-Z]{2,3}$/.test(draft.initials)) { flash('Indique 2 ou 3 initiales (prénom + nom)'); $('#c-ini')?.focus(); return; }
@@ -939,13 +1067,13 @@ const A = {
     render();
   },
   pro: d => { S.pro = d.mode; save(); render(); },
-  exitPro: () => { S.pro = null; save(); render(); },
+  exitPro: () => A.proLogout(),
   proOrder(d) {
     const o = S.orders.find(x => x.id === d.id) || S.fakeOrders.find(x => x.id === d.id);
     if (!o) return;
     if (S.orders.includes(o)) o.manual = true;
     setOrderStatus(o, d.st);
-    if (d.st === 'ready' && S.orders.includes(o)) flash(`📲 ${S.user.name} vient d’être notifié·e`);
+    if (d.st === 'ready' && S.orders.includes(o)) flash(`📲 ${me()} vient d’être notifié·e`);
     save(); render();
   },
   djAccept: d => { const r = S.requests.find(x => x.id === d.id); setReq(r, 'accepted'); if (!r.mine) flash('Ajouté à ta file'); save(); render(); },
@@ -983,11 +1111,19 @@ const IN = {
   dMsg: v => { draft.msg = v; },
   cIni: (v, el) => { draft.initials = v.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3); if (el.value !== draft.initials) el.value = draft.initials; },
   cDesc: v => { draft.desc = v; },
+  acName: v => { if (v.trim()) { S.user.name = v.trim(); save(); } },
+  acEmail: v => { S.account = { ...(S.account || {}), email: v.trim() }; save(); },
+  acPhone: v => { S.account = { ...(S.account || {}), phone: v.trim() }; save(); },
+  sgMail: v => { draft.email = v; },
+  proId: v => { draft.id = v; },
+  proCode: v => { draft.code = v; },
   coatQ: v => { coatQ = v; const r = $('#coat-list'); if (r) r.innerHTML = coatListHTML(); },
 };
 document.addEventListener('input', e => { const k = e.target.dataset.in; if (k && IN[k]) IN[k](e.target.value, e.target); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'onb-name') A.enter();
+  if (e.key === 'Enter' && e.target.id === 'pro-code') A.proGo();
+  if (e.key === 'Enter' && e.target.id === 'sg-mail') A.sgSearch();
   if (e.key === 'Escape') { if (S.takeover) A.tkoClose(); else closeSheet(); }
 });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') tick(); });
