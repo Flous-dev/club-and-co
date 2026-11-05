@@ -9,7 +9,10 @@ Prototype d'application mobile pour boîtes de nuit.
 - **Suivi en temps réel** : reçue → en préparation → prête, code de retrait + QR, écran plein « C'est prêt ! », vibration, son et notification.
 - **Demandes de sons au DJ** : recherche, message au DJ, boost payant (remboursé si refusé), votes de la salle, réponse du DJ (acceptée / refusée avec raison / jouée).
 - **Espace pro (démo)** : vue barman (file de commandes) et vue DJ (accepter / refuser / jouer) pour voir les deux côtés.
-- **Ma soirée** : billet d'entrée QR, vestiaire digital, budget de soirée, rappel d'hydratation (eau offerte), offrir un verre à un ami, fidélité.
+- **Billet** : liaison du billet Shotgun / guest list, pass sortie-retour.
+- **Vestiaire** : paiement 3 €/article dans l'app, numéro + initiales (+ description) donnés au comptoir et notés sur l'étiquette — récupérable même téléphone éteint. Vue vestiaire staff avec recherche.
+- **Angles morts** : fiche de secours (téléphone éteint / batterie faible), annulation remboursée, signalement de problème, rappel de commande non récupérée, pause des commandes en cas de rush, mode hors connexion, mode ID pour le DJ, filtre des messages, vérification 18+.
+- **Ma soirée** : budget de soirée, rappel d'hydratation (eau offerte), offrir un verre à un ami, fidélité.
 - **Sécurité** : VTC, partage de trajet, alerte discrète au staff, appel 112.
 
 ## Technique

@@ -459,3 +459,24 @@ textarea.field { height: 84px; padding: 14px 18px; resize: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ---------- V2 : vestiaire, secours, réseau ---------- */
+.check { display: flex; gap: 12px; align-items: flex-start; margin-top: 14px; font-size: 13px; color: var(--muted); font-weight: 600; cursor: pointer; }
+.check input { width: 20px; height: 20px; accent-color: var(--lime); flex: none; margin: 0; }
+.ai-box { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; background: var(--card-2); flex: none; }
+.coat-ticket { display: flex; align-items: center; gap: 14px; margin: 12px 0 6px; }
+.ini-badge { font-family: var(--font-d); font-weight: 800; font-size: 26px; letter-spacing: .04em; padding: 6px 14px; border-radius: 14px; background: var(--lime); color: var(--lime-ink); }
+.instr { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: var(--r-sm); background: rgba(212,255,58,.08); border: 1px solid rgba(212,255,58,.25); font-size: 13px; line-height: 1.45; }
+.instr .ic { color: var(--lime); margin-top: 1px; }
+.how { display: grid; gap: 8px; margin-top: 16px; }
+.how-step { display: flex; gap: 12px; align-items: center; font-size: 14px; font-weight: 600; }
+.how-step span { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--card-2); font-size: 12px; font-weight: 800; color: var(--lime); flex: none; }
+.field.initials { font-family: var(--font-d); font-size: 26px; letter-spacing: .2em; text-align: center; text-transform: uppercase; height: 64px; }
+.secours { padding: 16px; border-radius: var(--r); background: var(--card); border: 1px dashed var(--line-2); }
+.secours.low { border: 1px solid rgba(255,92,108,.5); background: rgba(255,92,108,.07); }
+.sec-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.sec-row span { color: var(--muted); flex: none; }
+.sec-row b { text-align: right; }
+#offline { position: absolute; left: 50%; bottom: calc(var(--nav-h) + var(--safe-b) + 12px); translate: -50% 0; z-index: 60; padding: 8px 14px; border-radius: 99px;
+  background: var(--warn); color: #1a1200; font-size: 12px; font-weight: 800; white-space: nowrap; display: none; }
+#offline.show { display: block; }

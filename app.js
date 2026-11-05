@@ -82,7 +82,7 @@ function seed() {
   const t = now();
   return {
     v: 1, user: null, tab: 'home', screen: null, cat: 'cocktails', bar: 'main', pay: 'wallet',
-    cart: [], tip: 0, orders: [], points: 40, coat: null, pro: null, budget: null, extras: [],
+    cart: [], tip: 0, orders: [], points: 40, coat: null, pro: null, budget: null, extras: [], ticket: null, barPaused: false, djHide: false, battWarned: false,
     notifs: [], takeover: null, notifOn: false, entryAt: t - 47 * 60000, np: { start: t - 40000 }, npOverride: null,
     requests: [
       { id: 'r1', t: 'Freed From Desire', a: 'Gala', by: 'Tom', votes: 23, status: 'pending', boost: true, at: t - 9 * 60000 },
@@ -97,6 +97,12 @@ function seed() {
       { id: 'f2', code: 'K07', who: 'Inès', lines: [{ name: 'Espresso Martini', qty: 1 }, { name: 'Néon Mojito', qty: 1 }], bar: 'main', status: 'received', at: t - 60000 },
       { id: 'f3', code: 'T44', who: 'Table 4', lines: [{ name: 'Champagne Brut', qty: 1 }], bar: 'main', status: 'received', at: t - 30000, table: '4' },
       { id: 'f4', code: 'M31', who: 'Sami', lines: [{ name: 'Gin Tonic', qty: 3 }], bar: 'roof', status: 'ready', at: t - 5 * 60000 },
+    ],
+    fakeCoats: [
+      { id: 'k1', num: 118, initials: 'HB', desc: 'Veste en jean', items: 1, status: 'stored' },
+      { id: 'k2', num: 131, initials: 'IM', desc: 'Manteau camel + écharpe', items: 2, status: 'fetching' },
+      { id: 'k3', num: 142, initials: 'SR', desc: 'Doudoune noire', items: 1, status: 'paid' },
+      { id: 'k4', num: 97, initials: 'LT', desc: 'Blouson cuir marron', items: 1, status: 'stored' },
     ],
   };
 }
@@ -164,7 +170,7 @@ const cartCount = () => S.cart.reduce((a, l) => a + l.qty, 0);
 const cartSub = () => S.cart.reduce((a, l) => a + l.qty * l.unit, 0);
 const tipAmt = () => Math.round(cartSub() * S.tip) / 100;
 const spent = () => S.orders.reduce((a, o) => a + o.total, 0) + S.extras.reduce((a, e) => a + e.amount, 0);
-const activeOrders = () => S.orders.filter(o => o.status !== 'picked');
+const activeOrders = () => S.orders.filter(o => !['picked', 'cancelled'].includes(o.status));
 const myPending = () => S.requests.filter(r => r.mine && r.status === 'pending');
 const unread = () => S.notifs.filter(n => !n.read).length;
 const alcoholCount = () => S.orders.reduce((a, o) => a + o.lines.reduce((b, l) => b + (l.alcohol ? l.qty : 0), 0), 0);
@@ -179,14 +185,18 @@ const STATUS = {
   preparing: { t: 'En préparation', s: 'Ton barman s’en occupe', n: 2 },
   ready: { t: 'C’est prêt !', s: 'Présente ton code au comptoir', n: 3 },
   picked: { t: 'Récupérée', s: 'Bonne soirée 🥂', n: 4 },
+  cancelled: { t: 'Annulée', s: 'Remboursée', n: 0 },
 };
 function currentTrack() {
   const t = now();
   if (S.npOverride && t - S.npOverride.start < TRACK_DUR) return { ...S.npOverride, p: (t - S.npOverride.start) / TRACK_DUR };
   const base = S.npOverride ? S.npOverride.start + TRACK_DUR : S.np.start;
   const el = Math.max(0, t - base), i = Math.floor(el / TRACK_DUR) % NOW_PLAYING.length;
-  return { ...NOW_PLAYING[i], p: (el % TRACK_DUR) / TRACK_DUR };
+  const tr = { ...NOW_PLAYING[i], p: (el % TRACK_DUR) / TRACK_DUR };
+  return S.djHide ? { ...tr, t: 'ID — titre secret 🤫', a: 'Le DJ garde ce morceau pour lui' } : tr;
 }
+const BANNED = ['connard', 'connasse', 'pute', 'salope', 'encul', 'nique', 'fdp', 'batard', 'bâtard'];
+const clean = m => BANNED.reduce((a, w) => a.replace(new RegExp(w + '\\w*', 'gi'), '***'), m);
 const trackHue = s => [...s].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
 const initials = s => s.replace(/[^A-Za-zÀ-ÿ0-9 ]/g, '').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '♪';
 
@@ -204,6 +214,17 @@ function chime(soft) {
     });
   } catch (e) { /* audio indisponible */ }
 }
+let battery = null;
+if (navigator.getBattery) navigator.getBattery().then(b => {
+  battery = b;
+  const onChange = () => {
+    if (S.user && b.level <= .2 && !b.charging && !S.battWarned) { S.battWarned = true; notify('Batterie faible 🔋', 'Ta fiche de secours (vestiaire, commandes) est dans Ma soirée', { go: 'night', soft: true }); save(); }
+    render();
+  };
+  b.addEventListener('levelchange', onChange); b.addEventListener('chargingchange', onChange); onChange();
+}).catch(() => {});
+window.addEventListener('online', () => render());
+window.addEventListener('offline', () => render());
 let swReg = null;
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').then(r => { swReg = r; }).catch(() => {});
 
@@ -242,6 +263,7 @@ function setOrderStatus(o, status) {
   if (S.orders.includes(o)) {
     if (status === 'preparing') notify('Commande en préparation', `${o.code} · ton barman est dessus`, { go: 'order:' + o.id, soft: true });
     if (status === 'ready') {
+      o.readyTime = now();
       notify('Ta commande est prête 🍸', `Code ${o.code} · ${o.table ? 'en route vers ta table' : CLUB.bars[o.bar].name}`, { go: 'order:' + o.id });
       if (!S.pro) S.takeover = { type: 'order', id: o.id };
     }
@@ -260,6 +282,13 @@ function setReq(r, status, reason) {
     if (r.mine) { notify('🔊 C’est ton son !', `${r.t} passe maintenant. Fonce sur la piste.`, { go: 'music' }); if (!S.pro) S.takeover = { type: 'song', id: r.id }; }
   }
 }
+function setCoat(c, st) {
+  c.status = st;
+  if (st === 'stored') c.storedAt = now();
+  if (c !== S.coat) return;
+  if (st === 'stored') notify('Affaires déposées 🧥', `#${c.num} · ${c.initials} — retiens ce numéro et tes initiales`, { go: 'night', soft: true });
+  if (st === 'ready') notify('Ton vestiaire est prêt 🧥', `#${c.num} · ${c.initials} — tes affaires t’attendent au comptoir`, { go: 'night' });
+}
 function genCode() {
   const L = 'ABCDEFHKMNPRTVXZ'; let c;
   do { c = pick([...L]) + String(Math.floor(Math.random() * 90) + 10); } while (S.orders.some(o => o.code === c));
@@ -270,7 +299,11 @@ let liveVoteAt = now();
 function tick() {
   const t = now(); let changed = false;
   for (const o of S.orders) {
-    if (o.manual || o.status === 'picked' || o.status === 'ready') continue;
+    if (o.status === 'ready' && !o.reminded && o.readyTime && t - o.readyTime > 120000) {
+      o.reminded = true; changed = true;
+      notify('Ta commande t’attend toujours 🍸', `${o.code} · ${o.table ? 'table ' + o.table : CLUB.bars[o.bar].name} — on la garde au frais`, { go: 'order:' + o.id });
+    }
+    if (o.manual || ['picked', 'ready', 'cancelled'].includes(o.status)) continue;
     if (o.status === 'received' && t >= o.prepAt) { setOrderStatus(o, 'preparing'); changed = true; }
     if (o.status === 'preparing' && t >= o.readyAt) { setOrderStatus(o, 'ready'); changed = true; }
   }
@@ -282,8 +315,7 @@ function tick() {
     if (r.status === 'accepted' && r.playAt && t >= r.playAt) { setReq(r, 'played'); changed = true; }
   }
   if (S.coat && S.coat.status === 'fetching' && t >= S.coat.readyAt) {
-    S.coat.status = 'ready'; changed = true;
-    notify('Ton vestiaire est prêt 🧥', `Ticket #${S.coat.num} · il t’attend au comptoir vestiaire`, { go: 'night' });
+    setCoat(S.coat, 'ready'); changed = true;
   }
   // La salle vote en direct
   if (t - liveVoteAt > 7000 && S.tab === 'music' && !S.screen) {
@@ -320,6 +352,7 @@ function vOnboarding() {
     </ul>
     <div class="scan-card">${ic('qr', 28)}<div><b>QR scanné à l’entrée</b><p class="small muted">${CLUB.name} · ${CLUB.area} — ${CLUB.event}</p></div></div>
     <input id="onb-name" class="field" placeholder="Ton prénom" autocomplete="given-name" maxlength="20">
+    <label class="check"><input type="checkbox" id="onb-age"><span>J’ai 18 ans ou plus — l’alcool n’est pas vendu aux mineurs</span></label>
     <button class="btn lime block" style="margin-top:12px" data-a="enter">Entrer dans la soirée ${ic('chev', 18)}</button>
     <p class="fine">Démo interactive — aucun paiement réel, aucune donnée envoyée.</p>
   </div>`;
@@ -358,8 +391,8 @@ function vHome() {
   <div class="section quick">
     <button class="tile lime" data-a="tab" data-tab="bar"><span class="ti">${ic('glass', 22)}</span><span><b>Commander un verre</b><span>~${CLUB.bars[S.bar].wait} min · zéro file</span></span></button>
     <button class="tile violet" data-a="tab" data-tab="music"><span class="ti">${ic('music', 22)}</span><span><b>Proposer un son</b><span>${myPending().length ? myPending().length + ' en attente du DJ' : 'Le DJ t’écoute'}</span></span></button>
-    <button class="tile" data-a="tab" data-tab="night"><span class="ti">${ic('hanger', 22)}</span><span><b>Vestiaire</b><span>${S.coat && S.coat.status !== 'done' ? 'Ticket #' + S.coat.num : 'Déposer · 3 €'}</span></span></button>
-    <button class="tile" data-a="ticket"><span class="ti">${ic('ticket', 22)}</span><span><b>Mon entrée</b><span>Validée à ${hhmm(S.entryAt)}</span></span></button>
+    <button class="tile" data-a="tab" data-tab="night"><span class="ti">${ic('hanger', 22)}</span><span><b>Vestiaire</b><span>${S.coat && S.coat.status !== 'done' ? '#' + S.coat.num + ' · ' + (S.coat.initials || '') : 'Déposer · 3 €'}</span></span></button>
+    <button class="tile" data-a="ticket"><span class="ti">${ic('ticket', 22)}</span><span><b>Mon entrée</b><span>${S.ticket ? 'Scannée à ' + hhmm(S.entryAt) : 'Lier mon billet Shotgun'}</span></span></button>
   </div>
   <div class="section stats">
     <div class="card stat"><p class="eyebrow">Attente au comptoir</p><p class="v">18<small> min</small></p><p class="xs muted">Avec Club&amp;Co : <b class="lime">${CLUB.bars[S.bar].wait} min</b></p></div>
@@ -377,6 +410,7 @@ function vBar() {
   const inCart = id => S.cart.filter(l => l.id === id).reduce((a, l) => a + l.qty, 0);
   return `${topbar('Le bar', `${CLUB.name} · sans attente`)}
   <div class="seg">${Object.entries(CLUB.bars).map(([k, b]) => `<button class="${S.bar === k ? 'on' : ''}" data-a="setBar" data-bar="${k}">${b.name} <small>${b.wait} min</small></button>`).join('')}</div>
+  ${S.barPaused ? `<div class="warn-box">${ic('clock', 18)} Rush au bar : commandes en pause quelques minutes. Ton panier est gardé.</div>` : ''}
   <div class="chips">${CATS.map(c => `<button class="${S.cat === c.id ? 'on' : ''}" data-a="cat" data-cat="${c.id}">${c.name}</button>`).join('')}</div>
   ${S.cat === 'bottles' ? `<div class="card small muted" style="margin-top:10px">${ic('star', 16, 'style="display:inline;vertical-align:-3px;color:var(--lime)"')} Les bouteilles sont servies directement à ta table par un hôte.</div>` : ''}
   <div class="items fade-in">${items.map(m => {
@@ -421,7 +455,7 @@ function vMusic() {
   const room = S.requests.filter(r => !r.mine && r.status !== 'played').sort((a, b) => (b.status === 'pending') - (a.status === 'pending') || (b.boost | 0) - (a.boost | 0) || b.votes - a.votes);
   return `${topbar('Musique', `DJ ${CLUB.dj} en live`)}
   <section class="np-big fade-in">
-    <div class="dj-row"><span class="avatar">${CLUB.dj[0]}</span><div class="grow"><b>${CLUB.dj}</b><p class="xs muted">Techno mélodique · accepte les demandes</p></div><span class="eq"><i></i><i></i><i></i><i></i></span></div>
+    <div class="dj-row"><span class="avatar">${CLUB.dj[0]}</span><div class="grow"><b>${CLUB.dj}</b><p class="xs muted">${ic('wave', 12, 'style="display:inline;vertical-align:-2px"')} Synchro en direct avec les platines</p></div><span class="eq"><i></i><i></i><i></i><i></i></span></div>
     <p class="eyebrow" style="margin-top:18px">${tr.by ? 'Demandé par ' + esc(tr.by === S.user.name ? 'toi 🔥' : tr.by) : 'En ce moment'}</p>
     <p class="np-t" data-np-t style="margin-top:6px">${esc(tr.t)}</p><p class="muted" data-np-a>${esc(tr.a)}</p>
     <div class="progress"><i data-np-p style="width:${(tr.p * 100).toFixed(1)}%"></i></div>
@@ -436,21 +470,60 @@ function vMusic() {
     <div class="results">${room.map(reqRow).join('')}</div></div>`;
 }
 
-function vNight() {
-  const sp = spent(), since = drinksSinceWater(), c = S.coat;
-  const coatBlock = !c || c.status === 'done'
-    ? `<div class="card row"><span class="ai" style="width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:var(--card-2)">${ic('hanger', 22)}</span><div class="grow"><b>Vestiaire digital</b><p class="xs muted">Dépose ton manteau, garde le ticket dans ton tel. Fini le ticket papier perdu.</p></div><button class="btn sm lime" data-a="coatDeposit">3 €</button></div>`
-    : `<div class="card"><div class="row between"><div><p class="eyebrow">Ticket vestiaire</p><p class="coat-num" style="margin-top:6px">#${c.num}</p></div>
-        ${c.status === 'stored' ? `<span class="chip ok">Déposé · ${hhmm(c.at)}</span>` : c.status === 'fetching' ? '<span class="chip warn">On va le chercher…</span>' : '<span class="chip lime">Prêt au comptoir</span>'}</div>
-        <div style="margin-top:14px">${c.status === 'stored' ? `<button class="btn block" data-a="coatFetch">${ic('hanger', 18)} Je pars bientôt — préparer mon manteau</button>` : c.status === 'fetching' ? `<p class="small muted">Le vestiaire prépare ton manteau, on te notifie dès qu’il est prêt.</p>` : `<button class="btn lime block" data-a="coatDone">${ic('check', 18)} J’ai récupéré mon manteau</button>`}</div></div>`;
-  return `${topbar('Ma soirée', `${CLUB.name} · ${CLUB.event}`)}
-  <div class="ticket fade-in">
-    <div class="ticket-top"><div class="row between"><span class="chip ok">${ic('check', 12)} Entrée validée</span><span class="xs muted">${hhmm(S.entryAt)}</span></div>
-      <p class="h1" style="font-size:24px;margin-top:14px">${CLUB.event}</p><p class="small muted">${CLUB.name} · ${CLUB.area} · Jeu. 5 nov.</p></div>
+function coatChip(c) {
+  return { paid: '<span class="chip warn">À déposer</span>', stored: `<span class="chip ok">Déposé · ${hhmm(c.storedAt || c.at)}</span>`, fetching: '<span class="chip warn">On le prépare…</span>', ready: '<span class="chip lime">Prêt au comptoir</span>', done: '<span class="chip ghost">Rendu</span>' }[c.status];
+}
+function coatTicket(c) {
+  return `<div class="coat-ticket"><span class="coat-num">#${c.num}</span><span class="ini-badge">${esc(c.initials || '—')}</span></div>`;
+}
+function vCoatBlock() {
+  const c = S.coat;
+  if (!c || c.status === 'done') return `<div class="card"><div class="row"><span class="ai-box">${ic('hanger', 22)}</span><div class="grow"><b>Vestiaire digital</b><p class="xs muted">Paie ici, donne ton numéro + tes initiales. Rien à perdre, même si ton téléphone s’éteint.</p></div></div>
+    <button class="btn lime block" style="margin-top:14px" data-a="coatDeposit">${ic('hanger', 18)} Déposer mes affaires · 3 €</button></div>`;
+  const action = {
+    paid: `<div class="instr">${ic('users', 18)}<span>Au comptoir, donne <b>#${c.num}</b> et tes initiales <b>${esc(c.initials)}</b>. Le vestiaire les écrit sur l’étiquette de ta veste.</span></div><button class="btn block" style="margin-top:12px" data-a="coatStored">${ic('check', 18)} C’est déposé</button>`,
+    stored: `<button class="btn block" data-a="coatFetch">${ic('hanger', 18)} Je pars bientôt — préparer mes affaires</button>`,
+    fetching: `<p class="small muted">Le vestiaire prépare tes affaires, on te notifie dès qu’elles sont prêtes.</p>`,
+    ready: `<p class="small" style="margin-bottom:10px">Présente <b>#${c.num} · ${esc(c.initials)}</b> au comptoir.</p><button class="btn lime block" data-a="coatDone">${ic('check', 18)} J’ai récupéré mes affaires</button>`,
+  }[c.status];
+  return `<div class="card"><div class="row between"><p class="eyebrow">Ticket vestiaire · ${c.items} article${c.items > 1 ? 's' : ''}</p>${coatChip(c)}</div>
+    ${coatTicket(c)}${c.desc ? `<p class="small muted">${esc(c.desc)}</p>` : ''}
+    <div style="margin-top:14px">${action}</div></div>`;
+}
+function vSecours() {
+  const act = activeOrders(), c = S.coat && S.coat.status !== 'done' ? S.coat : null;
+  if (!act.length && !c) return '';
+  const low = battery && battery.level <= .2 && !battery.charging;
+  return `<div class="section"><div class="secours ${low ? 'low' : ''}">
+    <div class="row between"><b>${ic('bolt', 16, 'style="display:inline;vertical-align:-3px"')} Si ton téléphone s’éteint</b>${low ? `<span class="chip bad">Batterie ${Math.round(battery.level * 100)} %</span>` : ''}</div>
+    <p class="xs muted" style="margin:4px 0 10px">Retiens ça (ou fais une capture) — le staff peut tout retrouver sans ton téléphone.</p>
+    ${c ? `<div class="sec-row"><span>Vestiaire</span><b>#${c.num} · ${esc(c.initials)}${c.desc ? ' · ' + esc(c.desc) : ''}</b></div>` : ''}
+    ${act.map(o => `<div class="sec-row"><span>Commande</span><b>${o.code} · au nom de ${esc(S.user.name)}</b></div>`).join('')}
+    <div class="sec-row"><span>Entrée</span><b>${esc(S.user.name)} · sur la liste du soir</b></div>
+  </div></div>`;
+}
+function vTicketCard() {
+  const tk = S.ticket;
+  if (!tk) return `<div class="ticket fade-in"><div class="ticket-top"><span class="chip warn">Billet non lié</span>
+      <p class="h1" style="font-size:24px;margin-top:14px">${CLUB.event}</p><p class="small muted">${CLUB.name} · ${CLUB.area} · Jeu. 5 nov.</p>
+      <p class="small" style="margin-top:12px">Tu as pris ta place sur Shotgun ? Lie-la pour la retrouver ici avec ton pass de sortie/retour.</p>
+      <button class="btn lime block" style="margin-top:14px" data-a="ticketLink">${ic('ticket', 18)} Lier mon billet</button></div></div>`;
+  return `<div class="ticket fade-in">
+    <div class="ticket-top"><div class="row between"><span class="chip ok">${ic('check', 12)} Scanné à l’entrée</span><span class="xs muted">${hhmm(S.entryAt)}</span></div>
+      <p class="h1" style="font-size:24px;margin-top:14px">${CLUB.event}</p><p class="small muted">${CLUB.name} · ${CLUB.area} · Jeu. 5 nov.</p>
+      <p class="xs muted" style="margin-top:8px">Billet ${esc(tk.src)} · ${esc(tk.type)} · réf. ${esc(tk.ref)}</p></div>
     <div class="ticket-cut"></div>
-    <div class="ticket-bottom"><div class="qr">${qr('entry' + S.user.name)}</div><div><p class="eyebrow">Pass</p><p><b>${esc(S.user.name)}</b> · Entrée standard</p><p class="xs muted" style="margin-top:6px">Sortie/retour autorisé jusqu’à 03:00 avec ce QR.</p></div></div>
-  </div>
-  <div class="section">${coatBlock}</div>
+    <div class="ticket-bottom"><div class="qr">${qr('entry' + S.user.name)}</div><div><p class="eyebrow">Pass sortie / retour</p><p><b>${esc(S.user.name)}</b></p><p class="xs muted" style="margin-top:6px">Valable jusqu’à 03:00.</p>
+      ${tk.src === 'Shotgun' ? `<a class="xs lime" style="display:inline-block;margin-top:8px;font-weight:700" href="https://shotgun.live" target="_blank" rel="noopener">Ouvrir dans Shotgun ↗</a>` : ''}</div></div>
+  </div>`;
+}
+
+function vNight() {
+  const sp = spent(), since = drinksSinceWater();
+  return `${topbar('Ma soirée', `${CLUB.name} · ${CLUB.event}`)}
+  ${vTicketCard()}
+  ${vSecours()}
+  <div class="section">${vCoatBlock()}</div>
   ${since >= 3 ? `<div class="section"><div class="hydra">${ic('drop', 26)}<div class="grow"><b>Petite pause eau ?</b><p class="xs muted">${since} verres depuis ta dernière eau. Elle est offerte.</p></div><button class="btn sm" data-a="addWater">Ajouter</button></div></div>` : ''}
   <div class="section"><div class="section-head"><h2 class="h2">Budget de la soirée</h2><span class="small"><b>${euro(sp)}</b>${S.budget ? ` / ${S.budget} €` : ''}</span></div>
     <div class="card">${S.budget ? `<div class="meter"><i style="width:${Math.min(100, sp / S.budget * 100)}%;background:${sp > S.budget ? 'var(--bad)' : 'var(--lime)'}"></i></div><p class="xs muted" style="margin-top:8px">${sp > S.budget ? 'Budget dépassé — on te prévient avant chaque paiement.' : `Il te reste ${euro(S.budget - sp)}.`}</p>` : `<p class="small muted">Fixe-toi une limite, on t’alerte avant de la dépasser.</p>`}
@@ -482,6 +555,7 @@ function vProfile() {
     <div class="action-list">
       <button class="action" data-a="pro" data-mode="bar"><span class="ai lime">${ic('glass')}</span><span class="grow"><b>Vue barman</b><span class="xs muted" style="display:block">File des commandes, préparation, remise</span></span><span class="chev">${ic('chev')}</span></button>
       <button class="action" data-a="pro" data-mode="dj"><span class="ai violet">${ic('headphones')}</span><span class="grow"><b>Vue DJ</b><span class="xs muted" style="display:block">Accepter ou refuser les demandes de sons</span></span><span class="chev">${ic('chev')}</span></button>
+      <button class="action" data-a="pro" data-mode="coat"><span class="ai">${ic('hanger')}</span><span class="grow"><b>Vue vestiaire</b><span class="xs muted" style="display:block">Retrouver un ticket par numéro + initiales</span></span><span class="chev">${ic('chev')}</span></button>
     </div></div>
   <div class="section"><button class="btn danger block" data-a="reset">${ic('refresh', 18)} Réinitialiser la démo</button>
     <p class="fine">Club&amp;Co · prototype v0.1 — les données restent sur ton téléphone.</p></div>`;
@@ -497,9 +571,9 @@ function vOrder(id) {
     <p class="eyebrow">${st.t}</p>
     <p class="code-big">${o.code}</p>
     <p class="${ready ? '' : 'muted'} small"><b>${pickupLabel(o)}</b></p>
-    ${o.status === 'picked' ? '' : `<div class="qr">${qr(o.id)}</div><p class="xs ${ready ? '' : 'muted'}">Montre ce code au barman</p>`}
+    ${['picked', 'cancelled'].includes(o.status) ? '' : `<div class="qr">${qr(o.id)}</div><p class="xs ${ready ? '' : 'muted'}">Montre ce code au barman</p>`}
   </section>
-  ${o.status !== 'picked' ? `<div class="card section"><div class="steps">${steps.map(([k, t, s]) => {
+  ${!['picked', 'cancelled'].includes(o.status) ? `<div class="card section"><div class="steps">${steps.map(([k, t, s]) => {
     const n = STATUS[k].n, cls = st.n > n ? 'done' : st.n === n ? (k === 'ready' ? 'done' : 'cur') : 'todo';
     return `<div class="step ${cls}"><span class="sdot">${cls === 'done' ? ic('check', 16) : ''}</span><div><b>${t}</b><span class="xs muted">${s}${cls === 'cur' && !o.manual ? ` · <span data-eta="${k === 'received' ? o.prepAt : o.readyAt}"></span>` : ''}</span></div></div>`;
   }).join('')}</div>
@@ -509,12 +583,17 @@ function vOrder(id) {
     ${o.tip ? `<div class="row between small muted" style="padding:6px 0"><span>Pourboire</span><span>${euro(o.tip)}</span></div>` : ''}
     <div class="row between" style="padding-top:10px;margin-top:6px;border-top:1px solid var(--line)"><b>Total payé</b><b>${euro(o.total)}</b></div></div>
   ${ready ? `<button class="btn lime block section" data-a="picked" data-id="${o.id}">${ic('check', 18)} J’ai récupéré ma commande</button>` : ''}
-  ${o.status === 'picked' ? `<button class="btn block section" data-a="reorder" data-id="${o.id}">${ic('refresh', 18)} Recommander la même chose</button>` : ''}`;
+  ${o.status === 'picked' ? `<button class="btn block section" data-a="reorder" data-id="${o.id}">${ic('refresh', 18)} Recommander la même chose</button>` : ''}
+  ${o.status === 'received' ? `<button class="btn danger block section" data-a="cancelOrder" data-id="${o.id}">${ic('x', 18)} Annuler — remboursement immédiat</button><p class="fine">Possible tant que le bar n’a pas commencé.</p>` : ''}
+  ${o.issue ? `<div class="warn-box">${ic('bell', 18)} Signalé : ${esc(o.issue)} — ${o.issueFix}</div>` : ''}
+  ${['ready', 'picked'].includes(o.status) && !o.issue ? `<button class="back-btn" style="margin:20px auto 0;display:flex" data-a="orderIssue" data-id="${o.id}">${ic('shield', 16)} Un problème avec ta commande ?</button>` : ''}
+  ${o.status === 'cancelled' ? `<div class="card section small">Commande annulée · ${euro(o.refunded)} remboursés sur ton moyen de paiement.</div>` : ''}`;
 }
 
 /* ---------- Vues : espace pro ---------- */
 function proBanner(kind) {
-  return `<div class="pro-banner ${kind === 'bar' ? 'bar' : ''}"><span>${ic(kind === 'bar' ? 'glass' : 'headphones', 16, 'style="display:inline;vertical-align:-3px"')}&nbsp; ESPACE PRO · ${kind === 'bar' ? 'BARMAN' : 'DJ'} (démo)</span><button data-a="exitPro">Quitter</button></div>`;
+  const k = { bar: ['glass', 'BARMAN'], dj: ['headphones', 'DJ'], coat: ['hanger', 'VESTIAIRE'] }[kind];
+  return `<div class="pro-banner ${kind === 'dj' ? '' : 'bar'}"><span>${ic(k[0], 16, 'style="display:inline;vertical-align:-3px"')}&nbsp; ESPACE PRO · ${k[1]} (démo)</span><button data-a="exitPro">Quitter</button></div>`;
 }
 function vProBar() {
   const all = [...S.orders.filter(o => o.status !== 'picked').map(o => ({ ...o, mine: true, who: S.user.name })), ...S.fakeOrders.filter(o => o.status !== 'picked')];
@@ -529,7 +608,8 @@ function vProBar() {
   const rev = S.orders.reduce((a, o) => a + o.total, 0) + 412;
   return `${proBanner('bar')}
   <h1 class="h1">Commandes</h1><p class="small muted" style="margin:6px 0 16px">${CLUB.name} · tous les bars</p>
-  <div class="kpis"><div class="kpi"><p class="eyebrow">En cours</p><p class="v">${all.filter(o => o.status !== 'ready').length}</p></div><div class="kpi"><p class="eyebrow">Temps moy.</p><p class="v">2:40</p></div><div class="kpi"><p class="eyebrow">CA soirée</p><p class="v">${Math.round(rev)}€</p></div></div>
+  <button class="action ${S.barPaused ? 'on' : ''}" style="margin-bottom:10px" data-a="barPause"><span class="ai">${ic('clock')}</span><span class="grow"><b>Mettre les commandes en pause</b><span class="xs muted" style="display:block">En cas de rush : les clients gardent leur panier</span></span><span class="switch lime-switch"></span></button>
+  <div class="kpis"><div class="kpi"><p class="eyebrow">En cours</p><p class="v">${all.filter(o => ['received', 'preparing'].includes(o.status)).length}</p></div><div class="kpi"><p class="eyebrow">Temps moy.</p><p class="v">2:40</p></div><div class="kpi"><p class="eyebrow">CA soirée</p><p class="v">${Math.round(rev)}€</p></div></div>
   ${col('received', 'Nouvelles')}${col('preparing', 'En préparation')}${col('ready', 'Prêtes à remettre')}`;
 }
 function vProDJ() {
@@ -540,6 +620,10 @@ function vProDJ() {
   return `${proBanner('dj')}
   <h1 class="h1">Demandes</h1><p class="small muted" style="margin:6px 0 16px">Triées par boost puis par votes de la salle</p>
   <div class="card np"><span class="np-art"><span class="eq"><i></i><i></i><i></i><i></i></span></span><span class="grow"><span class="eyebrow">Sur les platines</span><span class="np-t" data-np-t style="display:block">${esc(tr.t)}</span><span class="muted small" data-np-a>${esc(tr.a)}</span><span class="progress"><i data-np-p></i></span></span></div>
+  <div class="action-list" style="margin-top:10px">
+    <div class="action"><span class="ai violet">${ic('wave')}</span><span class="grow"><b>Platines connectées</b><span class="xs muted" style="display:block">CDJ via Pro DJ Link · titres détectés automatiquement</span></span><span class="chip ok">Live</span></div>
+    <button class="action ${S.djHide ? 'on' : ''}" data-a="djHide"><span class="ai violet">${ic('x')}</span><span class="grow"><b>Mode ID</b><span class="xs muted" style="display:block">Masquer le titre en cours dans l’app</span></span><span class="switch"></span></button>
+  </div>
   <div class="kpis" style="margin-top:10px"><div class="kpi"><p class="eyebrow">En attente</p><p class="v">${pending.length}</p></div><div class="kpi"><p class="eyebrow">Dans la file</p><p class="v">${queue.length}</p></div><div class="kpi"><p class="eyebrow">Pourboires</p><p class="v">${tips}€</p></div></div>
   <div class="col-title"><h2 class="h2">À traiter</h2><span class="n">${pending.length}</span></div>
   ${pending.length ? pending.map(r => `<div class="ticket-order ${r.mine ? 'mine' : ''}">
@@ -549,6 +633,28 @@ function vProDJ() {
   </div>`).join('') : `<div class="empty">Aucune demande en attente</div>`}
   <div class="col-title"><h2 class="h2">Ma file</h2><span class="n">${queue.length}</span></div>
   ${queue.length ? queue.map(r => `<div class="ticket-order"><div class="row"><span class="cover" style="--h:${trackHue(r.t)}">${initials(r.t)}</span><div class="grow" style="min-width:0"><p class="t-name">${esc(r.t)}</p><p class="t-sub">${esc(r.a)} · ${r.mine ? esc(S.user.name) : esc(r.by)}</p></div><button class="btn xs lime" data-a="djPlay" data-id="${r.id}">${ic('wave', 14)} Jouer</button></div></div>`).join('') : `<div class="empty">File vide</div>`}`;
+}
+
+let coatQ = '';
+function coatListHTML() {
+  const all = [...(S.coat && S.coat.status !== 'done' ? [{ ...S.coat, mine: true, id: 'mine' }] : []), ...S.fakeCoats.filter(c => c.status !== 'done')];
+  const q = coatQ.trim().toLowerCase();
+  const list = all.filter(c => !q || String(c.num).includes(q) || (c.initials || '').toLowerCase().includes(q));
+  const btn = c => ({
+    paid: `<button class="btn sm block" data-a="proCoat" data-id="${c.id}" data-st="stored">${ic('check', 16)} Initiales notées sur l’étiquette — déposé</button>`,
+    stored: `<button class="btn sm block" data-a="proCoat" data-id="${c.id}" data-st="ready">Client au comptoir — sortir ses affaires</button>`,
+    fetching: `<button class="btn sm lime block" data-a="proCoat" data-id="${c.id}" data-st="ready">${ic('bell', 16)} Prêt — notifier le client</button>`,
+    ready: `<button class="btn sm block" data-a="proCoat" data-id="${c.id}" data-st="done">Rendu au client</button>`,
+  })[c.status];
+  return list.length ? list.map(c => `<div class="ticket-order ${c.mine ? 'mine' : ''}"><div class="row between"><span class="code">#${c.num} · ${esc(c.initials || '—')}</span>${coatChip(c)}</div>
+    <p class="small muted" style="margin:6px 0 12px">${c.items} article${c.items > 1 ? 's' : ''}${c.desc ? ' · ' + esc(c.desc) : ''}${c.mine ? ' · ' + esc(S.user.name) : ''}</p>${btn(c)}</div>`).join('')
+    : '<div class="empty">Aucun ticket ne correspond</div>';
+}
+function vProCoat() {
+  return `${proBanner('coat')}
+  <h1 class="h1">Vestiaire</h1><p class="small muted" style="margin:6px 0 16px">Cherche par numéro ou initiales — ça marche même si le téléphone du client est éteint.</p>
+  <label class="search">${ic('search')}<input id="cq" class="field" type="search" placeholder="Ex : 214 ou AK" value="${esc(coatQ)}" data-in="coatQ" autocomplete="off"></label>
+  <div id="coat-list" style="margin-top:12px">${coatListHTML()}</div>`;
 }
 
 /* ---------- Sheets ---------- */
@@ -586,9 +692,10 @@ function sCart() {
   <div class="totals"><div class="row"><span class="muted">Sous-total</span><span>${euro(sub)}</span></div>${tip ? `<div class="row"><span class="muted">Pourboire</span><span>${euro(tip)}</span></div>` : ''}<div class="row"><span class="muted">Frais de service</span><span class="lime">Offerts</span></div><div class="row grand"><span>Total</span><span>${euro(tot)}</span></div></div>
   ${over ? `<div class="warn-box">${ic('wallet', 18)} Cette commande te fait dépasser ton budget de ${S.budget} €.</div>` : ''}
   <p class="xs muted" style="margin-top:12px">+${Math.floor(tot)} pts fidélité · ${table ? 'servi à ta table' : `à retirer au ${CLUB.bars[S.bar].name}`}</p>
-  <button class="btn lime block" style="margin-top:14px;height:60px" data-a="pay">${ic(S.pay === 'wallet' ? 'wallet' : 'card', 20)} Payer ${euro(tot)}</button>`;
+  ${S.barPaused ? `<div class="warn-box">${ic('clock', 18)} Le bar fait une courte pause (rush). Réessaie dans quelques minutes.</div>` : ''}
+  <button class="btn lime block" style="margin-top:14px;height:60px" data-a="pay" ${S.barPaused ? 'disabled' : ''}>${ic(S.pay === 'wallet' ? 'wallet' : 'card', 20)} Payer ${euro(tot)}</button>`;
 }
-const sPaying = done => `<div class="paying"><div>${done ? `<div class="done-check">${ic('check', 54)}</div><p class="sheet-title">Paiement accepté</p><p class="small muted" style="margin-top:6px">Ta commande part au bar</p>` : `<div class="ring"></div><p class="sheet-title">Validation…</p><p class="small muted" style="margin-top:6px">Paiement sécurisé (simulation)</p>`}</div></div>`;
+const sPaying = (done, msg = 'Ta commande part au bar') => `<div class="paying"><div>${done ? `<div class="done-check">${ic('check', 54)}</div><p class="sheet-title">Paiement accepté</p><p class="small muted" style="margin-top:6px">${msg}</p>` : `<div class="ring"></div><p class="sheet-title">Validation…</p><p class="small muted" style="margin-top:6px">Paiement sécurisé (simulation)</p>`}</div></div>`;
 
 function sPropose() {
   const tr = draft.track;
@@ -605,6 +712,26 @@ function sNotifs() {
   return `<p class="sheet-title">Notifications</p>
   <div style="margin-top:12px">${S.notifs.length ? S.notifs.map(n => `<button class="action" style="margin-bottom:8px" data-a="goNotif" data-id="${n.id}"><span class="ai" style="color:var(--lime)">${ic('bell', 18)}</span><span class="grow"><b class="small">${esc(n.title)}</b><span class="xs muted" style="display:block">${esc(n.body)}</span></span><span class="xs dim">${hhmm(n.at)}</span></button>`).join('') : '<div class="empty">Rien pour l’instant. Commande un verre ou propose un son !</div>'}</div>`;
 }
+function sCoat() {
+  return `<p class="sheet-title">Vestiaire</p><p class="small muted" style="margin-top:4px">3 € par article, payé ici. Pas de ticket papier à perdre.</p>
+  <div class="how">${['Paie et indique tes initiales', 'Au comptoir, donne ton numéro + tes initiales', 'Le vestiaire les écrit sur l’étiquette de ta veste'].map((t, i) => `<div class="how-step"><span>${i + 1}</span>${t}</div>`).join('')}</div>
+  <p class="opt-label">Tes initiales (prénom + nom)</p>
+  <input class="field initials" id="c-ini" maxlength="3" placeholder="AK" value="${esc(draft.initials)}" data-in="cIni" autocapitalize="characters" autocomplete="off">
+  <p class="opt-label">Description <span class="dim">(recommandé)</span></p>
+  <input class="field" id="c-desc" maxlength="40" placeholder="Ex : doudoune noire + sac beige" value="${esc(draft.desc)}" data-in="cDesc">
+  <p class="xs muted" style="margin-top:8px">Téléphone éteint en fin de soirée ? Numéro + initiales + description suffisent pour récupérer tes affaires.</p>
+  <div class="sheet-actions"><div class="stepper lg"><button data-a="cItems" data-v="-1" aria-label="Moins">${ic('minus')}</button><span>${draft.items}</span><button data-a="cItems" data-v="1" aria-label="Plus">${ic('plus')}</button></div>
+    <button class="btn lime grow" data-a="coatPay">Payer <span class="price">${euro(3 * draft.items)}</span></button></div>`;
+}
+const sTicketLink = () => `<p class="sheet-title">Lier mon billet</p><p class="small muted" style="margin-top:4px">Retrouve ici le billet que tu as acheté pour ${CLUB.event}.</p>
+  <div class="action-list" style="margin-top:16px">
+    <button class="action" data-a="linkGo" data-v="shotgun"><span class="ai lime">${ic('ticket')}</span><span class="grow"><b>Connecter mon compte Shotgun</b><span class="xs muted" style="display:block">On retrouve ton billet avec ton e-mail</span></span><span class="chev">${ic('chev')}</span></button>
+    <button class="action" data-a="linkGo" data-v="scan"><span class="ai">${ic('qr')}</span><span class="grow"><b>Scanner le QR de mon billet</b><span class="xs muted" style="display:block">Depuis une capture d’écran ou ton Wallet</span></span><span class="chev">${ic('chev')}</span></button>
+    <button class="action" data-a="linkGo" data-v="list"><span class="ai">${ic('users')}</span><span class="grow"><b>Je suis sur la guest list</b><span class="xs muted" style="display:block">Le club vérifie ton nom</span></span><span class="chev">${ic('chev')}</span></button>
+  </div><p class="fine">Démo : la liaison est simulée.</p>`;
+const ISSUES = [['Il manque un article', 'le bar te le prépare en priorité'], ['Ce n’est pas ma boisson', 'on te refait la bonne en priorité'], ['Boisson renversée / ratée', 'on te la refait, offerte'], ['Je n’ai rien reçu', 'un responsable bar arrive, remboursement si besoin']];
+const sIssue = id => `<p class="sheet-title">Un souci ?</p><p class="small muted" style="margin:4px 0 14px">Le bar reçoit ton signalement avec le détail de ta commande.</p>
+  <div class="options">${ISSUES.map(([r], i) => `<button class="opt" data-a="issueGo" data-id="${id}" data-v="${i}">${r}${ic('chev', 18)}</button>`).join('')}</div>`;
 const sTicket = () => `<p class="sheet-title">Mon entrée</p><p class="small muted" style="margin-top:4px">${CLUB.event} · ${CLUB.name}</p>
   <div class="qr" style="width:220px;height:220px;margin:22px auto">${qr('entry' + S.user.name)}</div>
   <p class="center small" style="text-align:center"><b>${esc(S.user.name)}</b> · Entrée validée à ${hhmm(S.entryAt)}</p>
@@ -652,7 +779,7 @@ function render() {
     const view = $('#view');
     let html, key;
     if (!S.user) { html = vOnboarding(); key = 'onb'; }
-    else if (S.pro) { html = S.pro === 'bar' ? vProBar() : vProDJ(); key = 'pro' + S.pro; }
+    else if (S.pro) { html = ({ bar: vProBar, dj: vProDJ, coat: vProCoat }[S.pro] || vProBar)(); key = 'pro' + S.pro; }
     else if (S.screen) { html = vOrder(S.screen.id); key = 'order' + S.screen.id; }
     else { html = ({ home: vHome, bar: vBar, music: vMusic, night: vNight, profile: vProfile }[S.tab] || vHome)(); key = S.tab; }
     view.innerHTML = html;
@@ -661,6 +788,7 @@ function render() {
     view.className = !showNav ? 'no-nav' : showCart ? 'with-cart' : '';
     if (key !== lastKey) { $('#scroll').scrollTop = 0; lastKey = key; }
     renderNav(showNav); renderCart(showCart);
+    $('#offline').classList.toggle('show', !navigator.onLine);
   });
   renderTakeover();
   updateLive();
@@ -689,6 +817,7 @@ function go(target) {
 /* ---------- Actions ---------- */
 const A = {
   enter() {
+    if (!$('#onb-age').checked) return flash('Coche la case : Club&Co est réservé aux 18 ans et plus');
     const name = ($('#onb-name').value || '').trim() || 'Toi';
     S.user = { name: name.charAt(0).toUpperCase() + name.slice(1) }; S.tab = 'home'; save(); render();
     setTimeout(() => notify(`Bienvenue au ${CLUB.name} ✨`, 'Ta soirée est prête : commande, propose tes sons, profite.', { go: 'home', soft: true }), 900);
@@ -711,6 +840,7 @@ const A = {
   tip: d => { S.tip = +d.v; save(); refreshSheet(); },
   payM: d => { S.pay = d.v; save(); refreshSheet(); },
   pay() {
+    if (!navigator.onLine) return flash('Pas de réseau — connecte-toi au Wi-Fi du club pour payer');
     askNotif();
     $('.sheet-body').innerHTML = sPaying(false); sheetFn = null;
     setTimeout(() => {
@@ -735,7 +865,7 @@ const A = {
   sendReq() {
     const tr = draft.track;
     if (S.requests.some(r => r.t.toLowerCase() === tr.t.toLowerCase() && ['pending', 'accepted'].includes(r.status))) { closeSheet(); return flash('Déjà demandé — vote pour lui dans la liste ❤️'); }
-    const r = { id: uid(), t: tr.t, a: tr.a, by: S.user.name, mine: true, votes: 1, voted: false, status: 'pending', boost: !!draft.boost, msg: draft.msg.trim(), at: now(), respondAt: now() + (draft.boost ? 9000 : 14000 + Math.random() * 8000) };
+    const r = { id: uid(), t: tr.t, a: tr.a, by: S.user.name, mine: true, votes: 1, voted: false, status: 'pending', boost: !!draft.boost, msg: clean(draft.msg.trim()), at: now(), respondAt: now() + (draft.boost ? 9000 : 14000 + Math.random() * 8000) };
     S.requests.unshift(r);
     if (r.boost) S.extras.push({ ref: r.id, label: 'Boost DJ', amount: 3 });
     askNotif(); query = ''; closeSheet(); save(); render();
@@ -744,7 +874,35 @@ const A = {
   vote: (d, e) => { e.stopPropagation(); const r = S.requests.find(x => x.id === d.id); if (!r || r.mine) return; r.voted = !r.voted; r.votes += r.voted ? 1 : -1; if (navigator.vibrate) navigator.vibrate(15); save(); render(); },
   notifs: () => { openSheet(sNotifs); save(); render(); },
   goNotif: d => { const n = S.notifs.find(x => x.id === d.id); closeSheet(); if (n && n.go) go(n.go); },
-  ticket: () => openSheet(sTicket),
+  ticket: () => openSheet(S.ticket ? sTicket : sTicketLink),
+  ticketLink: () => openSheet(sTicketLink),
+  linkGo(d) {
+    sheetFn = null;
+    $('.sheet-body').innerHTML = `<div class="paying"><div><div class="ring"></div><p class="sheet-title">${d.v === 'list' ? 'Vérification de la liste…' : 'Recherche de ton billet…'}</p></div></div>`;
+    setTimeout(() => {
+      const ref = Math.random().toString(36).slice(2, 8).toUpperCase();
+      S.ticket = d.v === 'list' ? { src: 'Guest list', type: 'Invitation', ref: 'GL-' + ref } : { src: 'Shotgun', type: 'Early Bird · 15 €', ref: 'SG-' + ref };
+      closeSheet(); save(); render();
+      notify('Billet lié ✅', `${S.ticket.src} · ${S.ticket.type} — scanné à l’entrée à ${hhmm(S.entryAt)}`, { go: 'night', soft: true });
+    }, 1500);
+  },
+  cancelOrder(d) {
+    const o = S.orders.find(x => x.id === d.id);
+    if (!o || o.status !== 'received') return flash('Trop tard, le bar a déjà commencé ta commande');
+    if (!confirm(`Annuler la commande ${o.code} et être remboursé ?`)) return;
+    o.refunded = o.total; S.points = Math.max(0, S.points - Math.floor(o.total)); o.total = 0; o.status = 'cancelled'; o.manual = true;
+    save(); render(); flash(`${euro(o.refunded)} remboursés`);
+  },
+  orderIssue: d => openSheet(() => sIssue(d.id)),
+  issueGo(d) {
+    const o = S.orders.find(x => x.id === d.id), [issue, fix] = ISSUES[+d.v];
+    if (!o) return;
+    o.issue = issue; o.issueFix = fix; closeSheet(); save(); render();
+    notify('Signalement envoyé', `${o.code} · ${fix}`, { go: 'order:' + o.id, soft: true });
+  },
+  barPause: () => { S.barPaused = !S.barPaused; save(); render(); flash(S.barPaused ? 'Commandes en pause — les clients sont prévenus' : 'Commandes réouvertes'); },
+  djHide: () => { S.djHide = !S.djHide; save(); render(); },
+  proCoat(d) { const c = d.id === 'mine' ? S.coat : S.fakeCoats.find(x => x.id === d.id); if (!c) return; setCoat(c, d.st); save(); render(); },
   safety: () => openSheet(sSafety),
   safeRide: () => { closeSheet(); flash('🚗 Ouverture de ton appli VTC (démo)'); },
   shareTrip: async () => {
@@ -754,8 +912,24 @@ const A = {
   },
   help: () => openSheet(sHelp),
   sendHelp: d => { closeSheet(); if (navigator.vibrate) navigator.vibrate(30); notify('Alerte envoyée 🛡️', `Un agent arrive · ${d.v} · ≈ 2 min. Reste où tu es.`, { soft: true }); },
-  coatDeposit() { askNotif(); S.coat = { num: 100 + Math.floor(Math.random() * 300), status: 'stored', at: now() }; S.extras.push({ label: 'Vestiaire', amount: 3 }); save(); render(); flash(`🧥 Ticket vestiaire #${S.coat.num} — payé 3 €`); },
-  coatFetch() { S.coat.status = 'fetching'; S.coat.readyAt = now() + 10000; save(); render(); flash('On prépare ton manteau, on te prévient'); },
+  coatDeposit() { draft = { initials: S.user.name.replace(/[^A-Za-z]/g, '').slice(0, 1).toUpperCase(), desc: '', items: 1 }; openSheet(sCoat); },
+  cItems: d => { draft.items = Math.max(1, Math.min(4, draft.items + +d.v)); refreshSheet(); },
+  coatPay() {
+    if (!/^[A-Z]{2,3}$/.test(draft.initials)) { flash('Indique 2 ou 3 initiales (prénom + nom)'); $('#c-ini')?.focus(); return; }
+    if (!navigator.onLine) return flash('Pas de réseau — connecte-toi au Wi-Fi du club pour payer');
+    askNotif(); const d = draft; sheetFn = null;
+    $('.sheet-body').innerHTML = sPaying(false);
+    setTimeout(() => {
+      $('.sheet-body').innerHTML = sPaying(true, 'Ton numéro de vestiaire arrive'); chime(true);
+      setTimeout(() => {
+        S.coat = { num: 150 + Math.floor(Math.random() * 300), initials: d.initials, desc: d.desc.trim(), items: d.items, status: 'paid', at: now() };
+        S.extras.push({ label: 'Vestiaire', amount: 3 * d.items });
+        closeSheet(); save(); render();
+      }, 800);
+    }, 1200);
+  },
+  coatStored: () => { setCoat(S.coat, 'stored'); save(); render(); },
+  coatFetch() { setCoat(S.coat, 'fetching'); S.coat.readyAt = now() + 10000; save(); render(); flash('On prépare ton manteau, on te prévient'); },
   coatDone() { S.coat.status = 'done'; save(); render(); flash('Bon retour 👋'); },
   budget: d => { S.budget = d.v ? +d.v : null; save(); render(); },
   async toggleNotif() {
@@ -807,8 +981,11 @@ const IN = {
   dTable: v => { draft.table = v.replace(/\D/g, ''); },
   dGift: v => { draft.gift = v; },
   dMsg: v => { draft.msg = v; },
+  cIni: (v, el) => { draft.initials = v.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3); if (el.value !== draft.initials) el.value = draft.initials; },
+  cDesc: v => { draft.desc = v; },
+  coatQ: v => { coatQ = v; const r = $('#coat-list'); if (r) r.innerHTML = coatListHTML(); },
 };
-document.addEventListener('input', e => { const k = e.target.dataset.in; if (k && IN[k]) IN[k](e.target.value); });
+document.addEventListener('input', e => { const k = e.target.dataset.in; if (k && IN[k]) IN[k](e.target.value, e.target); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'onb-name') A.enter();
   if (e.key === 'Escape') { if (S.takeover) A.tkoClose(); else closeSheet(); }
