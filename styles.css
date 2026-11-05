@@ -519,3 +519,6 @@ textarea.field { height: 84px; padding: 14px 18px; resize: none; }
 .demo-creds b { color: var(--lime); }
 .warn-box.err { color: #ff8b97; background: rgba(255,92,108,.1); }
 .found { margin-top: 14px; padding: 16px; border-radius: var(--r); background: var(--card); border: 1px solid rgba(212,255,58,.35); }
+.outing.tonight { border-color: rgba(212,255,58,.45); background: linear-gradient(135deg, rgba(212,255,58,.08), var(--card)); }
+.outing.later .outing-date { color: var(--muted); }
+.warn-t { color: var(--warn); font-weight: 700; }

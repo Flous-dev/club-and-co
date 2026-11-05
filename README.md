@@ -7,6 +7,7 @@ Prototype d'application mobile pour boîtes de nuit.
 ## Parcours
 1. **Compte** : prénom, e-mail, vérification 18+.
 2. **Accueil hors club** : scanner le QR à l'entrée du club, ou lier son billet Shotgun. Tant que ce n'est pas fait, bar, sons, vestiaire et commandes restent verrouillés. Accès aussi à « Mes sorties » et « Mon compte » (infos, moyens de paiement).
+   - **Mes billets** : lier Shotgun importe tous les billets (plusieurs soirées, plusieurs places). Un billet ne débloque l'app que le jour J. Les places en trop s'envoient à un ami par lien (`#billet=…`) ; il l'ajoute dans sa propre app, et on peut le reprendre tant qu'il n'est pas entré.
 3. **Dans le club** : onglets Club · Bar · Sons · Commandes · Soirée.
    - Bar : commande, paiement, suivi en temps réel, écran « C'est prêt ! ».
    - Sons : proposer un son, voir et liker les demandes des autres.

@@ -88,7 +88,7 @@ function seed() {
       { id: 'o2', club: 'Le Hangar 9', event: 'Afro Nights', date: 'sam. 17 oct.', spent: 30, songs: 1, coat: false, ticket: 'Entrée sur place', orders: [{ code: 'A12', time: '01:15', lines: '1× Tournée x6', total: 30 }] },
     ],
     tab: 'home', screen: null, cat: 'cocktails', bar: 'main', pay: 'wallet',
-    cart: [], tip: 0, orders: [], points: 40, coat: null, pro: null, budget: null, extras: [], ticket: null, barPaused: false, djHide: false, battWarned: false,
+    cart: [], tip: 0, orders: [], points: 40, coat: null, pro: null, budget: null, extras: [], ticket: null, tickets: [], sgLinked: null, claim: null, barPaused: false, djHide: false, battWarned: false,
     notifs: [], takeover: null, notifOn: false, entryAt: t - 47 * 60000, np: { start: t - 40000 }, npOverride: null,
     requests: [
       { id: 'r1', t: 'Freed From Desire', a: 'Gala', by: 'Tom', votes: 23, status: 'pending', boost: true, at: t - 9 * 60000 },
@@ -306,6 +306,10 @@ function genCode() {
 let liveVoteAt = now();
 function tick() {
   const t = now(); let changed = false;
+  for (const k of S.tickets) if (k.status === 'sent' && k.claimAt && t >= k.claimAt) {
+    k.status = 'claimed'; changed = true; if (sheetFn) refreshSheet();
+    notify(`${k.to} a ajouté son billet ✅`, `${k.event} · ${k.club} — il est à son nom dans son app`, { soft: true });
+  }
   for (const o of S.orders) {
     if (o.status === 'ready' && !o.reminded && o.readyTime && t - o.readyTime > 120000) {
       o.reminded = true; changed = true;
@@ -381,6 +385,88 @@ function vOnboarding() {
 
 const avatarBtn = () => `<button class="icon-btn avatar-btn" data-a="account" aria-label="Mon compte">${esc(me()[0].toUpperCase())}</button>`;
 
+/* ---------- Billets : plusieurs soirées, plusieurs places ----------
+   Un billet = une personne = un téléphone, pour une soirée.
+   Il ne débloque l'app que le jour J, dans le bon club. */
+const DAY = 86400000;
+const dayStart = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const isToday = d => d === dayStart(now());
+const dayLabel = d => new Date(d).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+const evKey = t => `${t.club}|${t.event}|${t.day}`;
+const tkRef = () => 'SG-' + Math.random().toString(36).slice(2, 8).toUpperCase();
+function events() {
+  const m = {};
+  for (const t of S.tickets) if (t.day >= dayStart(now())) (m[evKey(t)] ||= { ev: evKey(t), club: t.club, area: t.area, event: t.event, day: t.day, list: [] }).list.push(t);
+  return Object.values(m).sort((a, b) => a.day - b.day);
+}
+const tonightMine = () => S.tickets.find(t => isToday(t.day) && t.club === CLUB.name && t.status === 'mine');
+function shotgunImport() {
+  const d0 = dayStart(now());
+  const mk = (club, area, event, day, type, n) => Array.from({ length: n }, (_, i) => ({ id: uid(), club, area, event, day, type, ref: tkRef(), status: i ? 'free' : 'mine' }));
+  return [
+    ...mk(CLUB.name, CLUB.area, CLUB.event, d0, 'Early Bird · 15 €', 3),
+    ...mk('Le Hangar 9', 'Pantin', 'Afro Nights', d0 + 9 * DAY, 'Regular · 18 €', 1),
+    ...mk(CLUB.name, CLUB.area, 'Closing Season', d0 + 22 * DAY, 'Prévente · 20 €', 2),
+  ];
+}
+function vMyTickets() {
+  const evs = events();
+  const link = `<button class="action" style="margin-top:10px" data-a="ticketLink"><span class="ai lime">${ic('ticket')}</span><span class="grow"><b>Lier mon billet Shotgun</b><span class="xs muted" style="display:block">On retrouve tous tes billets avec ton e-mail</span></span><span class="chev">${ic('chev')}</span></button>`;
+  if (!evs.length) return S.sgLinked ? `<div class="section"><p class="eyebrow" style="margin-bottom:10px">Mes billets</p><div class="empty">Aucun billet à venir</div></div>` : link;
+  return `${S.sgLinked ? '' : link}<div class="section"><p class="eyebrow" style="margin-bottom:10px">Mes billets</p>
+    ${evs.map(e => {
+      const tn = isToday(e.day), free = e.list.filter(t => t.status === 'free').length;
+      return `<button class="outing ${tn ? 'tonight' : 'later'}" data-a="tkEvent" data-ev="${esc(e.ev)}"><span class="outing-date">${tn ? 'Ce soir' : esc(dayLabel(e.day))}</span>
+        <span class="grow" style="min-width:0"><b>${esc(e.event)}</b><span class="xs muted" style="display:block">${esc(e.club)} · ${e.list.length} billet${e.list.length > 1 ? 's' : ''}${free ? ` · <b class="warn-t">${free} à attribuer</b>` : ''}</span></span>
+        ${tn ? '' : `<span class="dim">${ic('lock', 14)}</span>`}<span class="chev dim">${ic('chev', 18)}</span></button>`;
+    }).join('')}</div>`;
+}
+function seatRow(t, hasMine) {
+  const head = (who, chip) => `<div class="row between"><b>${who}</b>${chip}</div><p class="xs muted" style="margin-top:4px">${esc(t.type)} · réf. ${esc(t.ref)}${t.from ? ' · offert par ' + esc(t.from) : ''}</p>`;
+  if (t.status === 'mine') return `<div class="ticket-order mine">${head(esc(me()) + ' <span class="muted">(toi)</span>', `<span class="chip ok">${ic('check', 12)} Ton billet</span>`)}</div>`;
+  if (t.status === 'free') return `<div class="ticket-order">${head('À attribuer', '<span class="chip warn">Libre</span>')}
+    <div class="row" style="gap:8px;margin-top:10px"><button class="btn xs lime" data-a="tkSend" data-id="${t.id}">${ic('send', 14)} Envoyer à un ami</button>${hasMine ? '' : `<button class="btn xs" data-a="tkKeep" data-id="${t.id}">C’est le mien</button>`}</div></div>`;
+  const sent = t.status === 'sent';
+  return `<div class="ticket-order">${head(esc(t.to), sent ? '<span class="chip warn">Lien envoyé</span>' : `<span class="chip ok">${ic('check', 12)} Dans son app</span>`)}
+    <div class="row" style="gap:8px;margin-top:10px">${sent ? `<button class="btn xs" data-a="tkShare" data-id="${t.id}">${ic('share', 14)} Renvoyer le lien</button>` : ''}<button class="btn xs danger" data-a="tkTake" data-id="${t.id}">Reprendre</button></div></div>`;
+}
+function sEvent() {
+  const e = events().find(x => x.ev === draft.ev);
+  if (!e) return `<p class="sheet-title">Billet introuvable</p>`;
+  const tn = isToday(e.day), mine = e.list.find(t => t.status === 'mine');
+  const here = tn && e.club === CLUB.name;
+  return `<p class="sheet-title">${esc(e.event)}</p><p class="small muted" style="margin-top:4px">${esc(e.club)} · ${esc(e.area)} · ${tn ? 'ce soir' : esc(dayLabel(e.day))}</p>
+  <p class="opt-label">${e.list.length} billet${e.list.length > 1 ? 's' : ''} · une personne par billet</p>
+  ${e.list.map(t => seatRow(t, !!mine)).join('')}
+  ${!tn ? `<div class="warn-box">${ic('lock', 16)} Ce billet débloquera l’app le ${esc(dayLabel(e.day))}, une fois à l’entrée · ${esc(e.club)}.</div>`
+    : S.checkedIn ? '' : !mine ? `<div class="warn-box">${ic('ticket', 16)} Garde un billet pour toi pour entrer.</div>`
+    : here ? `<button class="btn lime block" style="margin-top:16px" data-a="tkEnter" data-id="${mine.id}">Entrer dans la soirée ${ic('chev', 18)}</button><p class="fine">À la porte, le staff scanne ton billet : l’app se débloque toute seule.</p>` : ''}
+  ${e.list.some(t => t.status !== 'mine') ? `<p class="fine">Chaque ami ajoute son billet dans sa propre app : il commande et paie avec sa carte, et a son propre vestiaire. Tu peux reprendre un billet tant que la personne n’est pas entrée.</p>` : ''}`;
+}
+const claimLink = t => `${location.origin}${location.pathname}#billet=${encodeURIComponent(JSON.stringify({ c: t.club, a: t.area, e: t.event, d: t.day, y: t.type, r: t.ref, f: me() }))}`;
+function sSend() {
+  const t = S.tickets.find(x => x.id === draft.id);
+  if (!t) return `<p class="sheet-title">Billet introuvable</p>`;
+  if (t.status === 'free') return `<p class="sheet-title">Envoyer un billet</p><p class="small muted" style="margin-top:4px">${esc(t.event)} · ${esc(t.club)} · ${isToday(t.day) ? 'ce soir' : esc(dayLabel(t.day))}</p>
+    <p class="opt-label">Pour qui ?</p><input class="field" id="tk-name" maxlength="20" placeholder="Prénom de ton ami·e" value="${esc(draft.name)}" data-in="tkName">
+    <button class="btn lime block" style="margin-top:14px" data-a="tkCreate">${ic('send', 18)} Créer son lien</button>
+    <p class="fine">Le billet passe à son nom dès qu’il l’ajoute. Toi, tu ne peux plus l’utiliser.</p>`;
+  return `<p class="sheet-title">Billet pour ${esc(t.to)}</p><p class="small muted" style="margin-top:4px">Envoie-lui le lien, ou fais-lui scanner ce QR.</p>
+    <div class="qr">${qr(claimLink(t))}</div>
+    <button class="btn lime block" style="margin-top:14px" data-a="tkShare" data-id="${t.id}">${ic('share', 18)} Partager le lien</button>
+    <button class="btn block" style="margin-top:8px" data-a="tkEvent" data-ev="${esc(evKey(t))}">Retour à mes billets</button>
+    <p class="fine">Démo : le lien marche vraiment sur un autre téléphone, le QR est décoratif.</p>`;
+}
+function sClaim() {
+  const c = S.claim;
+  return `<p class="sheet-title">${esc(c.f)} t’a envoyé un billet 🎟️</p>
+  <div class="found"><div class="row between"><span class="chip ok">${ic('ticket', 12)} Shotgun</span><span class="xs muted">${isToday(c.d) ? 'Ce soir' : esc(dayLabel(c.d))}</span></div>
+    <p class="h2" style="margin-top:12px">${esc(c.e)}</p><p class="small muted">${esc(c.c)} · ${esc(c.a)}</p>
+    <div class="sec-row" style="margin-top:12px"><span>Billet</span><b>${esc(c.y)}</b></div><div class="sec-row"><span>Au nom de</span><b>${esc(me())}</b></div></div>
+  <button class="btn lime block" style="margin-top:16px" data-a="tkClaim">Ajouter à mes billets</button>
+  <button class="btn block" style="margin-top:8px" data-a="tkRefuse">Pas maintenant</button>`;
+}
+
 function vLobby() {
   const last = S.outings[0];
   return `<header class="topbar"><div class="brand">Club<span>&amp;</span>Co</div>${avatarBtn()}</header>
@@ -392,7 +478,7 @@ function vLobby() {
       <span class="grow"><b>Scanner le QR du club</b><span>À l’entrée, scanne le QR affiché pour débloquer ta soirée</span></span>
       ${ic('chev', 22)}
     </button>
-    <button class="action" style="margin-top:10px" data-a="ticketLink"><span class="ai lime">${ic('ticket')}</span><span class="grow"><b>Lier mon billet Shotgun</b><span class="xs muted" style="display:block">Billet pris sur Shotgun ? On le retrouve avec ton e-mail</span></span><span class="chev">${ic('chev')}</span></button>
+    ${vMyTickets()}
     <div class="section"><p class="eyebrow" style="margin-bottom:10px">Débloqué une fois dans le club</p>
       <div class="locked">${[['glass', 'Commander au bar'], ['music', 'Proposer des sons'], ['hanger', 'Vestiaire'], ['clock', 'Suivi des commandes']].map(([i, t]) => `<div class="lk">${ic(i, 18)}<span class="grow">${t}</span>${ic('lock', 13)}</div>`).join('')}</div></div>
     <div class="section quick">
@@ -496,9 +582,9 @@ const sProLogin = () => `<p class="sheet-title">Espace pro</p><p class="small mu
   <button class="btn lime block" style="margin-top:16px" data-a="proGo">Se connecter</button>
   <div class="demo-creds"><p class="eyebrow">Accès démo</p><p class="small" style="margin-top:6px">bar@nebula · dj@nebula · vestiaire@nebula</p><p class="small">Code : <b>2580</b></p></div>`;
 
-const sShotgun = () => `<p class="sheet-title">Lier mon billet Shotgun</p><p class="small muted" style="margin-top:4px">On retrouve ton billet grâce à l’e-mail de ton compte Shotgun.</p>
+const sShotgun = () => `<p class="sheet-title">Lier mon billet Shotgun</p><p class="small muted" style="margin-top:4px">On retrouve tous tes billets (toutes soirées, toutes places) grâce à l’e-mail de ton compte Shotgun.</p>
   <p class="opt-label">E-mail Shotgun</p><input class="field" id="sg-mail" type="email" value="${esc(draft.email)}" data-in="sgMail" placeholder="toi@email.com" autocomplete="email">
-  <button class="btn lime block" style="margin-top:14px" data-a="sgSearch">${ic('search', 18)} Rechercher mon billet</button>
+  <button class="btn lime block" style="margin-top:14px" data-a="sgSearch">${ic('search', 18)} Rechercher mes billets</button>
   <p class="fine">Démo : la connexion à Shotgun est simulée.</p>`;
 
 function vBar() {
@@ -599,13 +685,14 @@ function vTicketCard() {
       <p class="h1" style="font-size:24px;margin-top:14px">${CLUB.event}</p><p class="small muted">${CLUB.name} · ${CLUB.area} · Jeu. 5 nov.</p>
       <p class="small" style="margin-top:12px">Tu as pris ta place sur Shotgun ? Lie-la pour la retrouver ici avec ton pass de sortie/retour.</p>
       <button class="btn lime block" style="margin-top:14px" data-a="ticketLink">${ic('ticket', 18)} Lier mon billet</button></div></div>`;
-  return `<div class="ticket fade-in">
+  const free = S.tickets.filter(t => isToday(t.day) && t.club === CLUB.name && t.status === 'free').length;
+  return `${free ? `<button class="action" style="margin-bottom:10px" data-a="tkEvent" data-ev="${esc(evKey(tonightMine() || S.tickets.find(t => isToday(t.day) && t.club === CLUB.name)))}"><span class="ai lime">${ic('users')}</span><span class="grow"><b>${free} billet${free > 1 ? 's' : ''} à attribuer</b><span class="xs muted" style="display:block">Envoie-les à tes amis pour qu’ils débloquent leur app</span></span><span class="chev">${ic('chev')}</span></button>` : ''}<div class="ticket fade-in">
     <div class="ticket-top"><div class="row between"><span class="chip ok">${ic('check', 12)} Scanné à l’entrée</span><span class="xs muted">${hhmm(S.entryAt)}</span></div>
       <p class="h1" style="font-size:24px;margin-top:14px">${CLUB.event}</p><p class="small muted">${CLUB.name} · ${CLUB.area} · Jeu. 5 nov.</p>
       <p class="xs muted" style="margin-top:8px">Billet ${esc(tk.src)} · ${esc(tk.type)} · réf. ${esc(tk.ref)}</p></div>
     <div class="ticket-cut"></div>
     <div class="ticket-bottom"><div class="qr">${qr('entry' + me())}</div><div><p class="eyebrow">Pass sortie / retour</p><p><b>${esc(me())}</b></p><p class="xs muted" style="margin-top:6px">Valable jusqu’à 03:00.</p>
-      ${tk.src === 'Shotgun' ? `<a class="xs lime" style="display:inline-block;margin-top:8px;font-weight:700" href="https://shotgun.live" target="_blank" rel="noopener">Ouvrir dans Shotgun ↗</a>` : ''}</div></div>
+      ${tk.src.startsWith('Shotgun') ? `<a class="xs lime" style="display:inline-block;margin-top:8px;font-weight:700" href="https://shotgun.live" target="_blank" rel="noopener">Ouvrir dans Shotgun ↗</a>` : ''}</div></div>
   </div>`;
 }
 
@@ -740,6 +827,8 @@ function checkIn(via) {
   stopCam();
   const t = now();
   S.checkedIn = { via, at: t }; S.entryAt = t; S.tab = 'home'; S.screen = null;
+  const tk = tonightMine();
+  if (!S.ticket && tk) S.ticket = { src: tk.from ? 'Shotgun · offert par ' + tk.from : 'Shotgun', type: tk.type, ref: tk.ref };
   if (!S.ticket) S.ticket = { src: 'Entrée sur place', type: 'Billet porte', ref: 'NB-' + Math.random().toString(36).slice(2, 8).toUpperCase() };
   if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
   closeSheet(); save(); render();
@@ -905,6 +994,7 @@ const A = {
     S.user = { name: name.charAt(0).toUpperCase() + name.slice(1) };
     S.account = { email: ($('#onb-email').value || '').trim(), phone: '' };
     S.screen = null; save(); render();
+    if (S.claim) openSheet(sClaim);
   },
   scan() {
     openSheet(() => `<p class="sheet-title">Scanner le QR du club</p><p class="small muted" style="margin-top:4px">Vise le QR code affiché à l’entrée du club.</p>
@@ -919,18 +1009,61 @@ const A = {
     sheetFn = null;
     $('.sheet-body').innerHTML = `<div class="paying"><div><div class="ring"></div><p class="sheet-title">Recherche de ton billet…</p><p class="small muted" style="margin-top:6px">${esc(draft.email)}</p></div></div>`;
     setTimeout(() => {
-      $('.sheet-body').innerHTML = `<p class="sheet-title">Billet trouvé 🎉</p>
-        <div class="found"><div class="row between"><span class="chip ok">${ic('check', 12)} Shotgun</span><span class="xs muted">Ce soir</span></div>
-          <p class="h2" style="margin-top:12px">${CLUB.event}</p><p class="small muted">${CLUB.name} · ${CLUB.area}</p>
-          <div class="sec-row" style="margin-top:12px"><span>Billet</span><b>Early Bird · 15 €</b></div><div class="sec-row"><span>Statut</span><b class="lime">Scanné à l’entrée · ${hhmm(now())}</b></div></div>
-        <button class="btn lime block" style="margin-top:16px" data-a="sgEnter">Entrer dans la soirée ${ic('chev', 18)}</button>`;
+      const found = shotgunImport(), n = new Set(found.map(evKey)).size;
+      draft.found = found;
+      $('.sheet-body').innerHTML = `<p class="sheet-title">${found.length} billets trouvés 🎉</p><p class="small muted" style="margin-top:4px">${n} soirées · ${esc(draft.email)}</p>
+        <div class="found">${[...new Set(found.map(evKey))].map(k => { const l = found.filter(t => evKey(t) === k), t = l[0];
+          return `<div class="sec-row"><span>${isToday(t.day) ? '<b class="lime">Ce soir</b>' : esc(dayLabel(t.day))}</span><b>${esc(t.event)} · ${l.length} billet${l.length > 1 ? 's' : ''}</b></div>`; }).join('')}</div>
+        <button class="btn lime block" style="margin-top:16px" data-a="sgImport">Ajouter à mes billets ${ic('chev', 18)}</button>`;
     }, 1500);
   },
-  sgEnter() {
-    S.ticket = { src: 'Shotgun', type: 'Early Bird · 15 €', ref: 'SG-' + Math.random().toString(36).slice(2, 8).toUpperCase() };
-    if (S.account && !S.account.email) S.account.email = draft.email.trim();
-    checkIn('shotgun');
+  sgImport() {
+    const refs = new Set(S.tickets.map(t => t.ref));
+    S.tickets.push(...(draft.found || []).filter(t => !refs.has(t.ref)));
+    S.sgLinked = draft.email.trim();
+    if (S.account && !S.account.email) S.account.email = S.sgLinked;
+    const tk = tonightMine();
+    if (S.checkedIn && tk && (!S.ticket || S.ticket.src === 'Entrée sur place')) S.ticket = { src: 'Shotgun', type: tk.type, ref: tk.ref };
+    closeSheet(); save(); render(); flash('Billets Shotgun ajoutés');
   },
+  tkEvent: d => { draft = { ev: d.ev }; openSheet(sEvent); },
+  tkKeep: d => { const t = S.tickets.find(x => x.id === d.id); if (t) t.status = 'mine'; save(); refreshSheet(); render(); },
+  tkSend: d => { draft = { ...draft, id: d.id, name: '' }; openSheet(sSend); setTimeout(() => $('#tk-name')?.focus(), 300); },
+  tkCreate() {
+    const t = S.tickets.find(x => x.id === draft.id), name = (draft.name || '').trim();
+    if (!name) { flash('Indique le prénom de ton ami·e'); return $('#tk-name')?.focus(); }
+    t.status = 'sent'; t.to = name.charAt(0).toUpperCase() + name.slice(1); t.claimAt = now() + 12000; // démo : l'ami l'ajoute ~12 s plus tard
+    save(); refreshSheet(); render();
+  },
+  async tkShare(d) {
+    const t = S.tickets.find(x => x.id === d.id); if (!t) return;
+    const url = claimLink(t), data = { title: 'Ton billet Club&Co', text: `${me()} t’envoie un billet pour ${t.event} (${t.club}). Ajoute-le à ton app :`, url };
+    if (navigator.share) { try { await navigator.share(data); } catch (e) { /* annulé */ } }
+    else { try { await navigator.clipboard.writeText(url); flash('🔗 Lien copié'); } catch (e) { flash('🔗 Lien prêt (démo)'); } }
+  },
+  tkTake(d) {
+    const t = S.tickets.find(x => x.id === d.id); if (!t) return;
+    if (!confirm(`Reprendre le billet de ${t.to} ? Son lien ne marchera plus.`)) return;
+    t.status = 'free'; delete t.to; delete t.claimAt; save(); refreshSheet(); render();
+  },
+  tkEnter(d) {
+    const t = S.tickets.find(x => x.id === d.id); if (!t) return;
+    sheetFn = null;
+    $('.sheet-body').innerHTML = `<div class="paying"><div><div class="ring"></div><p class="sheet-title">Vérification à la porte…</p><p class="small muted" style="margin-top:6px">Billet ${esc(t.ref)}</p></div></div>`;
+    setTimeout(() => { S.ticket = { src: t.from ? 'Shotgun · offert par ' + t.from : 'Shotgun', type: t.type, ref: t.ref }; checkIn('shotgun'); }, 1300);
+  },
+  tkClaim() {
+    const c = S.claim; S.claim = null;
+    const day = dayStart(c.d), t = { id: uid(), club: c.c, area: c.a, event: c.e, day, type: c.y, ref: c.r, from: c.f };
+    const own = S.tickets.find(x => x.ref === c.r);
+    if (own && own.status !== 'mine') { save(); closeSheet(); return flash('C’est ton propre lien : envoie-le à ton ami·e'); }
+    if (own) { save(); closeSheet(); return flash('Ce billet est déjà dans tes billets'); }
+    if (day < dayStart(now())) { save(); closeSheet(); return flash('Ce billet a expiré'); }
+    if (S.tickets.some(x => evKey(x) === evKey(t) && x.status === 'mine')) { save(); closeSheet(); return flash('Tu as déjà ton billet pour cette soirée'); }
+    S.tickets.push({ ...t, status: 'mine' });
+    closeSheet(); save(); render(); flash(`Billet de ${c.f} ajouté 🎟️`);
+  },
+  tkRefuse: () => { S.claim = null; save(); closeSheet(); },
   account: () => { closeSheet(); S.screen = { name: 'account' }; save(); render(); },
   outings: () => { S.screen = { name: 'outings' }; save(); render(); },
   outing: d => { S.screen = { name: 'outing', id: d.id }; save(); render(); },
@@ -959,7 +1092,8 @@ const A = {
       date: new Date().toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }),
       orders: S.orders.filter(o => o.status !== 'cancelled').map(o => ({ code: o.code, time: hhmm(o.at), lines: o.lines.map(l => `${l.qty}× ${l.name}`).join(' · '), total: o.total })),
     });
-    const keep = ['user', 'account', 'cards', 'wallet', 'pay', 'outings', 'points', 'notifOn', 'budget'].reduce((o, k) => ({ ...o, [k]: S[k] }), {});
+    const keep = ['user', 'account', 'cards', 'wallet', 'pay', 'outings', 'points', 'notifOn', 'budget', 'sgLinked'].reduce((o, k) => ({ ...o, [k]: S[k] }), {});
+    keep.tickets = S.tickets.filter(t => !isToday(t.day));
     S = { ...seed(), ...keep }; save(); render(); flash('Soirée terminée — rentre bien 🌙');
   },
   tab: d => { S.tab = d.tab; S.screen = null; save(); render(); },
@@ -1115,6 +1249,7 @@ const IN = {
   acEmail: v => { S.account = { ...(S.account || {}), email: v.trim() }; save(); },
   acPhone: v => { S.account = { ...(S.account || {}), phone: v.trim() }; save(); },
   sgMail: v => { draft.email = v; },
+  tkName: v => { draft.name = v; },
   proId: v => { draft.id = v; },
   proCode: v => { draft.code = v; },
   coatQ: v => { coatQ = v; const r = $('#coat-list'); if (r) r.innerHTML = coatListHTML(); },
@@ -1124,9 +1259,18 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'onb-name') A.enter();
   if (e.key === 'Enter' && e.target.id === 'pro-code') A.proGo();
   if (e.key === 'Enter' && e.target.id === 'sg-mail') A.sgSearch();
+  if (e.key === 'Enter' && e.target.id === 'tk-name') A.tkCreate();
   if (e.key === 'Escape') { if (S.takeover) A.tkoClose(); else closeSheet(); }
 });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') tick(); });
 
+// Lien « billet offert » : #billet=<données du billet>
+(function readClaim() {
+  const m = location.hash.match(/^#billet=(.+)$/);
+  if (!m) return;
+  try { const c = JSON.parse(decodeURIComponent(m[1])); if (c && c.r && c.e) { S.claim = c; save(); } } catch (e) { /* lien invalide */ }
+  history.replaceState(null, '', location.pathname + location.search);
+})();
 render();
+if (S.claim && S.user && !S.pro) openSheet(sClaim);
 setInterval(tick, 1000);
