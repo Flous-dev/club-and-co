@@ -1,0 +1,819 @@
+'use strict';
+/* ==========================================================================
+   Club&Co — démo front-end (aucun backend : l'état vit dans le navigateur).
+   Le bar et le DJ sont simulés ; l'espace pro permet de jouer leur rôle.
+   ========================================================================== */
+
+const STORE = 'clubco-demo-v1';
+const PREP_DELAY = 6000;    // reçue -> en préparation (accéléré pour la démo)
+const READY_DELAY = 24000;  // reçue -> prête
+const TRACK_DUR = 150000;   // durée d'un titre "en cours"
+
+const now = () => Date.now();
+const uid = () => Math.random().toString(36).slice(2, 9);
+const euro = n => (Math.round(n * 100) / 100).toFixed(2).replace('.', ',') + ' €';
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const hhmm = t => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+const ago = t => { const m = Math.round((now() - t) / 60000); return m < 1 ? "à l'instant" : m < 60 ? `il y a ${m} min` : `il y a ${Math.floor(m / 60)} h`; };
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
+/* ---------- Données ---------- */
+const CLUB = {
+  name: 'Nébula', area: 'Paris 11e', event: 'Midnight Pulse', closes: '06:00', dj: 'NOVA',
+  bars: { main: { name: 'Bar principal', wait: 2 }, roof: { name: 'Bar Rooftop', wait: 4 } },
+  lineup: [
+    { t: '23:00', n: 'Léa K', s: 'Warm-up house' },
+    { t: '01:00', n: 'NOVA', s: 'Techno mélodique', now: true },
+    { t: '03:30', n: 'NOVA b2b Kito', s: 'Closing jusqu’à 6h' },
+  ],
+};
+
+const CATS = [
+  { id: 'cocktails', name: 'Cocktails' }, { id: 'beers', name: 'Bières' }, { id: 'shots', name: 'Shots' },
+  { id: 'softs', name: 'Softs' }, { id: 'bottles', name: 'Bouteilles' },
+];
+
+const MENU = [
+  { id: 'c1', cat: 'cocktails', name: 'Néon Mojito', desc: 'Rhum blanc, citron vert, menthe fraîche, sirop de yuzu', price: 12, emoji: '🍸', h: 85, tag: 'Signature', premium: true, ice: true },
+  { id: 'c2', cat: 'cocktails', name: 'Espresso Martini', desc: 'Vodka, liqueur de café, espresso serré', price: 13, emoji: '☕', h: 28, tag: 'Populaire', premium: true },
+  { id: 'c3', cat: 'cocktails', name: 'Passion Star', desc: 'Vodka vanille, fruit de la passion, bulles à côté', price: 13, emoji: '🥂', h: 45, premium: true },
+  { id: 'c4', cat: 'cocktails', name: 'Spritz Nébula', desc: 'Bitter orange, prosecco, soda, orange sanguine', price: 11, emoji: '🍹', h: 12, ice: true },
+  { id: 'c5', cat: 'cocktails', name: 'Moscow Mule', desc: 'Vodka, ginger beer, citron vert', price: 12, emoji: '🫚', h: 150, premium: true, ice: true },
+  { id: 'c6', cat: 'cocktails', name: 'Gin Tonic', desc: 'Gin, tonic premium, concombre & poivre rose', price: 11, emoji: '🧊', h: 190, premium: true, ice: true },
+  { id: 'b1', cat: 'beers', name: 'Pression 25cl', desc: 'Blonde de la maison, bien fraîche', price: 6, emoji: '🍺', h: 42 },
+  { id: 'b2', cat: 'beers', name: 'Pinte 50cl', desc: 'Blonde de la maison', price: 10, emoji: '🍺', h: 38, tag: 'Populaire' },
+  { id: 'b3', cat: 'beers', name: 'Blonde mexicaine', desc: '33cl, quartier de citron vert', price: 8, emoji: '🍋', h: 58 },
+  { id: 's1', cat: 'shots', name: 'Tequila', desc: 'Sel & citron', price: 6, emoji: '🥃', h: 60 },
+  { id: 's2', cat: 'shots', name: 'Liqueur aux herbes', desc: 'Servie glacée', price: 6, emoji: '🌿', h: 110 },
+  { id: 's3', cat: 'shots', name: 'Tournée x6', desc: '6 shooters maison à partager avec ta team', price: 30, emoji: '🔥', h: 5, tag: 'Groupe' },
+  { id: 'f4', cat: 'softs', name: 'Eau 50cl', desc: 'Plate ou gazeuse — offerte, hydrate-toi', price: 0, emoji: '💧', h: 200, tag: 'Offerte', soft: true },
+  { id: 'f1', cat: 'softs', name: 'Virgin Mule', desc: 'Ginger beer, citron vert, menthe — 0% alcool', price: 8, emoji: '🌱', h: 130, soft: true, ice: true },
+  { id: 'f2', cat: 'softs', name: 'Energy drink', desc: '25cl', price: 6, emoji: '⚡', h: 225, soft: true },
+  { id: 'f3', cat: 'softs', name: 'Cola', desc: '33cl', price: 5, emoji: '🥤', h: 355, soft: true, ice: true },
+  { id: 'v1', cat: 'bottles', name: 'Champagne Brut', desc: '75cl, servi en seau directement à ta table', price: 140, emoji: '🍾', h: 48, table: true },
+  { id: 'v2', cat: 'bottles', name: 'Vodka Premium', desc: '70cl + 6 softs, servie à ta table', price: 180, emoji: '💎', h: 265, table: true, tag: 'VIP' },
+  { id: 'v3', cat: 'bottles', name: 'Gin Premium', desc: '70cl + 6 tonics, servi à ta table', price: 170, emoji: '🫧', h: 172, table: true },
+];
+const byId = id => MENU.find(m => m.id === id);
+
+const TRACKS = [
+  ['Losing It', 'FISHER', 'Tech house'], ['Cola', 'CamelPhat & Elderbrook', 'House'], ['Innerbloom', 'RÜFÜS DU SOL', 'Mélodique'],
+  ['Strobe', 'deadmau5', 'Progressive'], ['Rumble', 'Skrillex, Fred again.. & Flowdan', 'Bass'], ['Turn On The Lights again..', 'Fred again.. & Swedish House Mafia', 'House'],
+  ['One More Time', 'Daft Punk', 'French touch'], ['Get Lucky', 'Daft Punk', 'Disco'], ['Alors on danse', 'Stromae', 'Électro'],
+  ['Djadja', 'Aya Nakamura', 'Afropop'], ['Pookie', 'Aya Nakamura', 'Afropop'], ['Freed From Desire', 'Gala', 'Eurodance'],
+  ['Blue (Da Ba Dee)', 'Eiffel 65', 'Eurodance'], ['Levels', 'Avicii', 'EDM'], ['Titanium', 'David Guetta ft. Sia', 'EDM'],
+  ['Houdini', 'Dua Lipa', 'Pop'], ['Padam Padam', 'Kylie Minogue', 'Pop'], ['Espresso', 'Sabrina Carpenter', 'Pop'],
+  ['Mr. Brightside', 'The Killers', 'Rock'], ['Gasolina', 'Daddy Yankee', 'Reggaeton'], ['Tití Me Preguntó', 'Bad Bunny', 'Reggaeton'],
+  ['Sweet Dreams', 'Eurythmics', 'Classique'], ['Music Sounds Better With You', 'Stardust', 'French touch'], ['Lady (Hear Me Tonight)', 'Modjo', 'French touch'],
+  ['Show Me Love', 'Robin S', 'House'], ['Sandstorm', 'Darude', 'Trance'], ['Children', 'Robert Miles', 'Trance'],
+  ['Pjanoo', 'Eric Prydz', 'House'], ['Sweet Disposition', 'The Temper Trap', 'Indie'], ['Tout va bien', 'Alonzo, Ninho & Naps', 'Rap FR'],
+].map(([t, a, g], i) => ({ id: 't' + i, t, a, g }));
+
+const NOW_PLAYING = [
+  { t: 'Innerbloom (NOVA edit)', a: 'RÜFÜS DU SOL' }, { t: 'Pjanoo', a: 'Eric Prydz' },
+  { t: 'Cola', a: 'CamelPhat & Elderbrook' }, { t: 'Strobe', a: 'deadmau5' },
+];
+
+const DECLINE_REASONS = ['Pas le style du set', 'Déjà joué ce soir', 'Plutôt pour le closing', 'Pas dans ma bibliothèque'];
+
+function seed() {
+  const t = now();
+  return {
+    v: 1, user: null, tab: 'home', screen: null, cat: 'cocktails', bar: 'main', pay: 'wallet',
+    cart: [], tip: 0, orders: [], points: 40, coat: null, pro: null, budget: null, extras: [],
+    notifs: [], takeover: null, notifOn: false, entryAt: t - 47 * 60000, np: { start: t - 40000 }, npOverride: null,
+    requests: [
+      { id: 'r1', t: 'Freed From Desire', a: 'Gala', by: 'Tom', votes: 23, status: 'pending', boost: true, at: t - 9 * 60000 },
+      { id: 'r2', t: 'Losing It', a: 'FISHER', by: 'Inès', votes: 17, status: 'accepted', at: t - 18 * 60000 },
+      { id: 'r3', t: 'Alors on danse', a: 'Stromae', by: 'Yanis', votes: 11, status: 'pending', at: t - 6 * 60000 },
+      { id: 'r4', t: 'Djadja', a: 'Aya Nakamura', by: 'Sarah', votes: 8, status: 'pending', at: t - 4 * 60000, msg: 'Pour l’anniv de Clara 🎂' },
+      { id: 'r5', t: 'Music Sounds Better With You', a: 'Stardust', by: 'Hugo', votes: 5, status: 'pending', at: t - 2 * 60000 },
+      { id: 'r6', t: 'Mr. Brightside', a: 'The Killers', by: 'Léo', votes: 3, status: 'declined', reason: 'Plutôt pour le closing', at: t - 30 * 60000 },
+    ].map(r => ({ mine: false, voted: false, ...r })),
+    fakeOrders: [
+      { id: 'f1', code: 'B12', who: 'Hugo', lines: [{ name: 'Pinte 50cl', qty: 2 }, { name: 'Tequila', qty: 2 }], bar: 'main', status: 'preparing', at: t - 3 * 60000 },
+      { id: 'f2', code: 'K07', who: 'Inès', lines: [{ name: 'Espresso Martini', qty: 1 }, { name: 'Néon Mojito', qty: 1 }], bar: 'main', status: 'received', at: t - 60000 },
+      { id: 'f3', code: 'T44', who: 'Table 4', lines: [{ name: 'Champagne Brut', qty: 1 }], bar: 'main', status: 'received', at: t - 30000, table: '4' },
+      { id: 'f4', code: 'M31', who: 'Sami', lines: [{ name: 'Gin Tonic', qty: 3 }], bar: 'roof', status: 'ready', at: t - 5 * 60000 },
+    ],
+  };
+}
+
+let S = load();
+function load() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORE));
+    if (raw && raw.v === 1) return { ...seed(), ...raw, takeover: null };
+  } catch (e) { /* stockage indisponible */ }
+  return seed();
+}
+function save() { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) { /* ignore */ } }
+
+/* ---------- Icônes ---------- */
+const P = {
+  home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  glass: '<path d="M5 4h14l-7 8z"/><path d="M12 12v8M8 20h8"/>',
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', minus: '<path d="M5 12h14"/>', check: '<path d="M20 6 9 17l-5-5"/>', x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  heart: '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  bolt: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  hanger: '<path d="M10 6a2 2 0 1 1 2 2c-.6 0-1 .4-1 1v1"/><path d="m11 10 9.2 6.4c.9.6.4 2-.6 2H3.4c-1 0-1.5-1.4-.6-2z"/>',
+  ticket: '<path d="M2 9a3 3 0 0 0 0 6v3a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-3a3 3 0 0 0 0-6V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2M13 17v2M13 11v2"/>',
+  back: '<path d="m15 18-6-6 6-6"/>', chev: '<path d="m9 18 6-6-6-6"/>',
+  car: '<path d="M5 17h14M6 17v2M18 17v2M3 13l2-6h14l2 6v4H3z"/><path d="M7 13h.01M17 13h.01"/>',
+  gift: '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/>',
+  star: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
+  send: '<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  users: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M16 4a4 4 0 0 1 0 8M22 21a7 7 0 0 0-4-6.3"/>',
+  card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>',
+  drop: '<path d="M12 2.7s-7 7.3-7 12.3a7 7 0 0 0 14 0c0-5-7-12.3-7-12.3z"/>',
+  pin: '<path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/>',
+  sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 15.5-6.3L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.5 6.3L3 16M3 21v-5h5"/>',
+  qr: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM21 14v.01M14 21h.01M17 21h4v-4"/>',
+  headphones: '<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1v-6h3zM3 19a2 2 0 0 0 2 2h1v-6H3z"/>',
+  wallet: '<path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v4h-4a2 2 0 0 0 0 4h4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5"/>',
+  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
+  phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
+  wave: '<path d="M2 12h2M6 8v8M10 4v16M14 7v10M18 10v4M22 12h0"/>',
+};
+const ic = (n, s = 20, extra = '') => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ${extra}>${P[n]}</svg>`;
+
+/* QR de démonstration (déterministe, décoratif) */
+function qr(seedStr) {
+  let h = 2166136261;
+  for (const c of seedStr) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  const rnd = () => { h ^= h << 13; h >>>= 0; h ^= h >>> 17; h ^= h << 5; h >>>= 0; return h / 4294967296; };
+  const n = 25, inFinder = (x, y) => (x < 8 && y < 8) || (x > n - 9 && y < 8) || (x < 8 && y > n - 9);
+  let d = '';
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (!inFinder(x, y) && rnd() < .48) d += `M${x} ${y}h1v1h-1z`;
+  const f = (x, y) => `<rect x="${x}" y="${y}" width="7" height="7"/><rect x="${x + 1}" y="${y + 1}" width="5" height="5" fill="#fff"/><rect x="${x + 2}" y="${y + 2}" width="3" height="3"/>`;
+  return `<svg viewBox="0 0 ${n} ${n}" shape-rendering="crispEdges" fill="#0a0a0a"><path d="${d}"/>${f(0, 0)}${f(n - 7, 0)}${f(0, n - 7)}</svg>`;
+}
+
+/* ---------- Calculs ---------- */
+const cartCount = () => S.cart.reduce((a, l) => a + l.qty, 0);
+const cartSub = () => S.cart.reduce((a, l) => a + l.qty * l.unit, 0);
+const tipAmt = () => Math.round(cartSub() * S.tip) / 100;
+const spent = () => S.orders.reduce((a, o) => a + o.total, 0) + S.extras.reduce((a, e) => a + e.amount, 0);
+const activeOrders = () => S.orders.filter(o => o.status !== 'picked');
+const myPending = () => S.requests.filter(r => r.mine && r.status === 'pending');
+const unread = () => S.notifs.filter(n => !n.read).length;
+const alcoholCount = () => S.orders.reduce((a, o) => a + o.lines.reduce((b, l) => b + (l.alcohol ? l.qty : 0), 0), 0);
+const lastWaterIdx = () => S.orders.findIndex(o => o.lines.some(l => l.id === 'f4'));
+const drinksSinceWater = () => {
+  const i = lastWaterIdx(); const list = i === -1 ? S.orders : S.orders.slice(0, i);
+  return list.reduce((a, o) => a + o.lines.reduce((b, l) => b + (l.alcohol ? l.qty : 0), 0), 0);
+};
+const pickupLabel = o => o.table ? `Servi à la table ${esc(o.table)}` : CLUB.bars[o.bar].name;
+const STATUS = {
+  received: { t: 'Commande reçue', s: 'Le bar a bien reçu ta commande', n: 1 },
+  preparing: { t: 'En préparation', s: 'Ton barman s’en occupe', n: 2 },
+  ready: { t: 'C’est prêt !', s: 'Présente ton code au comptoir', n: 3 },
+  picked: { t: 'Récupérée', s: 'Bonne soirée 🥂', n: 4 },
+};
+function currentTrack() {
+  const t = now();
+  if (S.npOverride && t - S.npOverride.start < TRACK_DUR) return { ...S.npOverride, p: (t - S.npOverride.start) / TRACK_DUR };
+  const base = S.npOverride ? S.npOverride.start + TRACK_DUR : S.np.start;
+  const el = Math.max(0, t - base), i = Math.floor(el / TRACK_DUR) % NOW_PLAYING.length;
+  return { ...NOW_PLAYING[i], p: (el % TRACK_DUR) / TRACK_DUR };
+}
+const trackHue = s => [...s].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
+const initials = s => s.replace(/[^A-Za-zÀ-ÿ0-9 ]/g, '').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '♪';
+
+/* ---------- Son & notifications ---------- */
+let audio = null;
+function chime(soft) {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const notes = soft ? [523.25] : [659.25, 987.77, 1318.5];
+    notes.forEach((f, i) => {
+      const o = audio.createOscillator(), g = audio.createGain(), t0 = audio.currentTime + i * .11;
+      o.type = 'sine'; o.frequency.value = f; o.connect(g); g.connect(audio.destination);
+      g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(.18, t0 + .02); g.gain.exponentialRampToValueAtTime(.001, t0 + .5);
+      o.start(t0); o.stop(t0 + .55);
+    });
+  } catch (e) { /* audio indisponible */ }
+}
+let swReg = null;
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').then(r => { swReg = r; }).catch(() => {});
+
+function notify(title, body, opts = {}) {
+  const n = { id: uid(), title, body, at: now(), go: opts.go || null, read: false };
+  S.notifs.unshift(n); S.notifs = S.notifs.slice(0, 40);
+  toast(n);
+  chime(opts.soft);
+  if (navigator.vibrate) navigator.vibrate(opts.soft ? 60 : [140, 70, 140]);
+  if (S.notifOn && 'Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+    const o = { body, icon: 'icon-192.png', badge: 'icon-192.png', tag: n.id };
+    try { swReg ? swReg.showNotification(title, o) : new Notification(title, o); } catch (e) { /* ignore */ }
+  }
+}
+function toast(n) {
+  const el = document.createElement('button');
+  el.className = 'toast';
+  el.innerHTML = `<span class="app-ico">&amp;</span><span class="grow"><b>${esc(n.title)}</b><p>${esc(n.body)}</p></span><span class="xs dim">maint.</span>`;
+  el.onclick = () => { n.read = true; if (n.go) go(n.go); el.remove(); };
+  $('#toasts').prepend(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, 5200);
+}
+function flash(msg) { toast({ title: msg, body: '', go: null }); }
+async function askNotif() {
+  if (!('Notification' in window)) return false;
+  if (Notification.permission === 'default') { try { await Notification.requestPermission(); } catch (e) { /* ignore */ } }
+  S.notifOn = Notification.permission === 'granted';
+  save();
+  return S.notifOn;
+}
+
+/* ---------- Logique métier ---------- */
+function setOrderStatus(o, status) {
+  if (o.status === status) return;
+  o.status = status;
+  if (S.orders.includes(o)) {
+    if (status === 'preparing') notify('Commande en préparation', `${o.code} · ton barman est dessus`, { go: 'order:' + o.id, soft: true });
+    if (status === 'ready') {
+      notify('Ta commande est prête 🍸', `Code ${o.code} · ${o.table ? 'en route vers ta table' : CLUB.bars[o.bar].name}`, { go: 'order:' + o.id });
+      if (!S.pro) S.takeover = { type: 'order', id: o.id };
+    }
+  }
+}
+function setReq(r, status, reason) {
+  r.status = status; r.reason = reason || null; r.manual = true;
+  if (status === 'accepted') {
+    r.playAt = now() + 35000;
+    if (r.mine) notify(`🎧 ${CLUB.dj} a accepté ton son`, `${r.t} — ${r.a} passe dans quelques minutes`, { go: 'music' });
+  }
+  if (status === 'declined' && r.mine) notify('Demande non retenue', `${r.t} · « ${reason} »${r.boost ? ' — boost remboursé' : ''}`, { go: 'music', soft: true });
+  if (status === 'declined' && r.mine && r.boost) S.extras = S.extras.filter(e => e.ref !== r.id);
+  if (status === 'played') {
+    S.npOverride = { t: r.t, a: r.a, by: r.by, start: now() };
+    if (r.mine) { notify('🔊 C’est ton son !', `${r.t} passe maintenant. Fonce sur la piste.`, { go: 'music' }); if (!S.pro) S.takeover = { type: 'song', id: r.id }; }
+  }
+}
+function genCode() {
+  const L = 'ABCDEFHKMNPRTVXZ'; let c;
+  do { c = pick([...L]) + String(Math.floor(Math.random() * 90) + 10); } while (S.orders.some(o => o.code === c));
+  return c;
+}
+
+let liveVoteAt = now();
+function tick() {
+  const t = now(); let changed = false;
+  for (const o of S.orders) {
+    if (o.manual || o.status === 'picked' || o.status === 'ready') continue;
+    if (o.status === 'received' && t >= o.prepAt) { setOrderStatus(o, 'preparing'); changed = true; }
+    if (o.status === 'preparing' && t >= o.readyAt) { setOrderStatus(o, 'ready'); changed = true; }
+  }
+  for (const r of S.requests) {
+    if (r.mine && !r.manual && r.status === 'pending' && t >= r.respondAt) {
+      if (r.boost || Math.random() < .75) setReq(r, 'accepted'); else setReq(r, 'declined', pick(DECLINE_REASONS));
+      changed = true;
+    }
+    if (r.status === 'accepted' && r.playAt && t >= r.playAt) { setReq(r, 'played'); changed = true; }
+  }
+  if (S.coat && S.coat.status === 'fetching' && t >= S.coat.readyAt) {
+    S.coat.status = 'ready'; changed = true;
+    notify('Ton vestiaire est prêt 🧥', `Ticket #${S.coat.num} · il t’attend au comptoir vestiaire`, { go: 'night' });
+  }
+  // La salle vote en direct
+  if (t - liveVoteAt > 7000 && S.tab === 'music' && !S.screen) {
+    liveVoteAt = t;
+    const pool = S.requests.filter(r => r.status === 'pending' || (r.mine && r.status === 'accepted'));
+    if (pool.length) { pick(pool).votes++; changed = true; }
+  }
+  if (changed) { save(); render(); }
+  updateLive();
+}
+function updateLive() {
+  const tr = currentTrack();
+  $$('[data-np-p]').forEach(el => { el.style.width = (tr.p * 100).toFixed(1) + '%'; });
+  $$('[data-np-t]').forEach(el => { if (el.textContent !== tr.t) el.textContent = tr.t; });
+  $$('[data-np-a]').forEach(el => { if (el.textContent !== tr.a) el.textContent = tr.a; });
+  $$('[data-eta]').forEach(el => {
+    const s = Math.max(0, Math.ceil((+el.dataset.eta - now()) / 1000));
+    el.textContent = s > 0 ? `≈ ${s} s` : 'd’une seconde à l’autre';
+  });
+}
+
+/* ---------- Vues : client ---------- */
+const bell = () => `<button class="icon-btn" data-a="notifs" aria-label="Notifications">${ic('bell')}${unread() ? '<i class="dot"></i>' : ''}</button>`;
+const topbar = (title, sub) => `<header class="topbar"><div><p class="eyebrow">${sub}</p><h1 class="h1">${title}</h1></div>${bell()}</header>`;
+
+function vOnboarding() {
+  return `<div class="onb fade-in">
+    <div class="logo-big">Club<span>&amp;</span><br>Co</div>
+    <p class="tagline"><b>La nuit, sans la file.</b><br>Commande, paie, danse. On te prévient.</p>
+    <ul class="onb-feats">
+      <li><span class="fi">${ic('glass')}</span>Commande & paie depuis la piste</li>
+      <li><span class="fi">${ic('bell')}</span>Notifié dès que ton verre est prêt</li>
+      <li><span class="fi">${ic('music')}</span>Propose tes sons au DJ en direct</li>
+    </ul>
+    <div class="scan-card">${ic('qr', 28)}<div><b>QR scanné à l’entrée</b><p class="small muted">${CLUB.name} · ${CLUB.area} — ${CLUB.event}</p></div></div>
+    <input id="onb-name" class="field" placeholder="Ton prénom" autocomplete="given-name" maxlength="20">
+    <button class="btn lime block" style="margin-top:12px" data-a="enter">Entrer dans la soirée ${ic('chev', 18)}</button>
+    <p class="fine">Démo interactive — aucun paiement réel, aucune donnée envoyée.</p>
+  </div>`;
+}
+
+function orderLive(o) {
+  const st = STATUS[o.status];
+  return `<button class="order-live st-${o.status}" data-a="openOrder" data-id="${o.id}">
+    <span class="ol-code">${o.code}</span>
+    <span class="grow"><span class="ol-title">${st.t}</span><span class="muted small" style="display:block">${pickupLabel(o)} · ${o.lines.reduce((a, l) => a + l.qty, 0)} article(s)</span>
+      <span class="mini-steps">${[1, 2, 3].map(i => `<i class="${st.n >= i ? 'on' : ''}"></i>`).join('')}</span></span>
+    ${ic('chev')}
+  </button>`;
+}
+function npCard() {
+  const tr = currentTrack();
+  return `<button class="card np" style="width:100%;text-align:left" data-a="tab" data-tab="music">
+    <span class="np-art"><span class="eq"><i></i><i></i><i></i><i></i></span></span>
+    <span class="grow" style="min-width:0"><span class="eyebrow">En ce moment · DJ ${CLUB.dj}</span>
+      <span class="np-t" data-np-t style="display:block">${esc(tr.t)}</span><span class="muted small" data-np-a>${esc(tr.a)}</span>
+      <span class="progress"><i data-np-p style="width:${(tr.p * 100).toFixed(1)}%"></i></span></span>
+  </button>`;
+}
+
+function vHome() {
+  const act = activeOrders(), saved = S.orders.length * 17;
+  return `<header class="topbar"><div class="brand">Club<span>&amp;</span>Co</div>${bell()}</header>
+  <section class="hero fade-in">
+    <span class="chip live">Live</span>
+    <h1 class="h1">${CLUB.name}</h1>
+    <p class="muted">Salut ${esc(S.user.name)} 👋 Profite, on gère le reste.</p>
+    <div class="hero-meta"><span class="chip ghost">${ic('pin', 13)} ${CLUB.area}</span><span class="chip ghost">${CLUB.event}</span><span class="chip ghost">${ic('clock', 13)} jusqu’à ${CLUB.closes}</span></div>
+  </section>
+  ${act.length ? `<div class="section"><div class="section-head"><h2 class="h2">Tes commandes</h2></div>${act.map(orderLive).join('')}</div>` : ''}
+  <div class="section">${npCard()}</div>
+  <div class="section quick">
+    <button class="tile lime" data-a="tab" data-tab="bar"><span class="ti">${ic('glass', 22)}</span><span><b>Commander un verre</b><span>~${CLUB.bars[S.bar].wait} min · zéro file</span></span></button>
+    <button class="tile violet" data-a="tab" data-tab="music"><span class="ti">${ic('music', 22)}</span><span><b>Proposer un son</b><span>${myPending().length ? myPending().length + ' en attente du DJ' : 'Le DJ t’écoute'}</span></span></button>
+    <button class="tile" data-a="tab" data-tab="night"><span class="ti">${ic('hanger', 22)}</span><span><b>Vestiaire</b><span>${S.coat && S.coat.status !== 'done' ? 'Ticket #' + S.coat.num : 'Déposer · 3 €'}</span></span></button>
+    <button class="tile" data-a="ticket"><span class="ti">${ic('ticket', 22)}</span><span><b>Mon entrée</b><span>Validée à ${hhmm(S.entryAt)}</span></span></button>
+  </div>
+  <div class="section stats">
+    <div class="card stat"><p class="eyebrow">Attente au comptoir</p><p class="v">18<small> min</small></p><p class="xs muted">Avec Club&amp;Co : <b class="lime">${CLUB.bars[S.bar].wait} min</b></p></div>
+    <div class="card stat"><p class="eyebrow">Affluence</p><p class="v">82<small> %</small></p><div class="meter"><i style="width:82%"></i></div></div>
+  </div>
+  ${saved ? `<div class="card" style="margin-top:10px"><div class="row"><span class="lime">${ic('clock', 22)}</span><p class="small"><b>${saved} min de queue évitées</b> ce soir. Ça fait ${Math.round(saved / 3.5)} sons de plus sur la piste.</p></div></div>` : ''}
+  <div class="section"><div class="section-head"><h2 class="h2">Line-up</h2><span class="xs muted">Ce soir</span></div>
+    <div class="card timeline">${CLUB.lineup.map((l, i) => `<div class="tl ${l.now ? 'now' : i === 0 ? 'past' : ''}"><div><b>${l.n}</b><span class="xs muted">${l.s}</span></div><span class="chip ${l.now ? 'lime' : 'ghost'}">${l.now ? 'En live' : l.t}</span></div>`).join('')}</div>
+  </div>
+  <div class="section"><button class="safe-banner" data-a="safety">${ic('shield', 26)}<span class="grow"><b>Rentrer en sécurité</b><span class="xs muted" style="display:block">VTC, partage de trajet, alerte discrète au staff</span></span>${ic('chev')}</button></div>`;
+}
+
+function vBar() {
+  const items = MENU.filter(m => m.cat === S.cat);
+  const inCart = id => S.cart.filter(l => l.id === id).reduce((a, l) => a + l.qty, 0);
+  return `${topbar('Le bar', `${CLUB.name} · sans attente`)}
+  <div class="seg">${Object.entries(CLUB.bars).map(([k, b]) => `<button class="${S.bar === k ? 'on' : ''}" data-a="setBar" data-bar="${k}">${b.name} <small>${b.wait} min</small></button>`).join('')}</div>
+  <div class="chips">${CATS.map(c => `<button class="${S.cat === c.id ? 'on' : ''}" data-a="cat" data-cat="${c.id}">${c.name}</button>`).join('')}</div>
+  ${S.cat === 'bottles' ? `<div class="card small muted" style="margin-top:10px">${ic('star', 16, 'style="display:inline;vertical-align:-3px;color:var(--lime)"')} Les bouteilles sont servies directement à ta table par un hôte.</div>` : ''}
+  <div class="items fade-in">${items.map(m => {
+    const q = inCart(m.id);
+    return `<button class="item" data-a="item" data-id="${m.id}">
+      <span class="thumb" style="--h:${m.h}">${m.emoji}</span>
+      <span class="grow"><span class="item-name">${m.name}${m.tag ? `<span class="tag ${m.price === 0 ? 'free' : ''}">${m.tag}</span>` : ''}</span>
+      <span class="item-desc">${m.desc}</span><span class="item-price" style="display:block">${m.price ? euro(m.price) : 'Offert'}</span></span>
+      <span class="add ${q ? 'has' : ''}" data-a="quickAdd" data-id="${m.id}">${q || ic('plus', 18)}</span>
+    </button>`;
+  }).join('')}</div>`;
+}
+
+function trackRow(tr, action) {
+  return `<button class="track" data-a="${action}" data-id="${tr.id}">
+    <span class="cover" style="--h:${trackHue(tr.t)}">${initials(tr.t)}</span>
+    <span class="grow"><span class="t-name" style="display:block">${esc(tr.t)}</span><span class="t-sub" style="display:block">${esc(tr.a)}${tr.g ? ' · ' + tr.g : ''}</span></span>
+    <span class="chip violet">${ic('send', 13)} Proposer</span>
+  </button>`;
+}
+let query = '';
+function resultsHTML() {
+  const q = query.trim().toLowerCase();
+  if (!q) return `<p class="eyebrow" style="margin:14px 0 4px">Tendances ce soir</p>` + TRACKS.filter((_, i) => [0, 6, 9, 11, 26].includes(i)).map(t => trackRow(t, 'propose')).join('');
+  const res = TRACKS.filter(t => (t.t + ' ' + t.a + ' ' + t.g).toLowerCase().includes(q)).slice(0, 8);
+  return res.map(t => trackRow(t, 'propose')).join('') +
+    `<button class="track" data-a="proposeCustom"><span class="cover" style="--h:80">+</span><span class="grow"><span class="t-name" style="display:block">Proposer « ${esc(query.trim())} »</span><span class="t-sub" style="display:block">Titre hors catalogue — le DJ vérifiera</span></span></button>`;
+}
+function reqRow(r) {
+  const chip = { pending: '<span class="chip warn">En attente</span>', accepted: '<span class="chip ok">Acceptée</span>', declined: '<span class="chip bad">Refusée</span>', played: '<span class="chip lime">Jouée</span>' }[r.status];
+  return `<div class="track">
+    <span class="cover" style="--h:${trackHue(r.t)}">${initials(r.t)}</span>
+    <span class="grow"><span class="t-name" style="display:block">${esc(r.t)}${r.boost ? ` <span class="tag">Boost</span>` : ''}</span>
+      <span class="t-sub" style="display:block">${esc(r.a)} · ${r.mine ? 'toi' : esc(r.by)} · ${chip}</span>
+      ${r.status === 'declined' && r.reason ? `<span class="req-reason" style="display:block">« ${esc(r.reason)} » — ${CLUB.dj}</span>` : ''}
+      ${r.msg ? `<span class="req-reason" style="display:block">💬 ${esc(r.msg)}</span>` : ''}</span>
+    <button class="vote ${r.voted ? 'on' : ''}" data-a="vote" data-id="${r.id}" ${r.mine || r.status === 'declined' || r.status === 'played' ? 'disabled' : ''} aria-label="Voter">${ic('heart', 18)}${r.votes}</button>
+  </div>`;
+}
+function vMusic() {
+  const tr = currentTrack(), mine = S.requests.filter(r => r.mine), act = myPending().length;
+  const room = S.requests.filter(r => !r.mine && r.status !== 'played').sort((a, b) => (b.status === 'pending') - (a.status === 'pending') || (b.boost | 0) - (a.boost | 0) || b.votes - a.votes);
+  return `${topbar('Musique', `DJ ${CLUB.dj} en live`)}
+  <section class="np-big fade-in">
+    <div class="dj-row"><span class="avatar">${CLUB.dj[0]}</span><div class="grow"><b>${CLUB.dj}</b><p class="xs muted">Techno mélodique · accepte les demandes</p></div><span class="eq"><i></i><i></i><i></i><i></i></span></div>
+    <p class="eyebrow" style="margin-top:18px">${tr.by ? 'Demandé par ' + esc(tr.by === S.user.name ? 'toi 🔥' : tr.by) : 'En ce moment'}</p>
+    <p class="np-t" data-np-t style="margin-top:6px">${esc(tr.t)}</p><p class="muted" data-np-a>${esc(tr.a)}</p>
+    <div class="progress"><i data-np-p style="width:${(tr.p * 100).toFixed(1)}%"></i></div>
+  </section>
+  <div class="section">
+    <div class="section-head"><h2 class="h2">Proposer un son</h2><span class="row xs muted" style="gap:8px">${act}/3 <span class="limit">${[0, 1, 2].map(i => `<i class="${i < act ? 'on' : ''}"></i>`).join('')}</span></span></div>
+    <label class="search">${ic('search')}<input id="q" class="field" type="search" placeholder="Titre, artiste, style…" value="${esc(query)}" data-in="query" autocomplete="off"></label>
+    <div class="results" id="results">${resultsHTML()}</div>
+  </div>
+  ${mine.length ? `<div class="section"><div class="section-head"><h2 class="h2">Mes demandes</h2></div><div class="results">${mine.map(reqRow).join('')}</div></div>` : ''}
+  <div class="section"><div class="section-head"><h2 class="h2">Demandes de la salle</h2><span class="xs muted">Vote ❤️</span></div>
+    <div class="results">${room.map(reqRow).join('')}</div></div>`;
+}
+
+function vNight() {
+  const sp = spent(), since = drinksSinceWater(), c = S.coat;
+  const coatBlock = !c || c.status === 'done'
+    ? `<div class="card row"><span class="ai" style="width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:var(--card-2)">${ic('hanger', 22)}</span><div class="grow"><b>Vestiaire digital</b><p class="xs muted">Dépose ton manteau, garde le ticket dans ton tel. Fini le ticket papier perdu.</p></div><button class="btn sm lime" data-a="coatDeposit">3 €</button></div>`
+    : `<div class="card"><div class="row between"><div><p class="eyebrow">Ticket vestiaire</p><p class="coat-num" style="margin-top:6px">#${c.num}</p></div>
+        ${c.status === 'stored' ? `<span class="chip ok">Déposé · ${hhmm(c.at)}</span>` : c.status === 'fetching' ? '<span class="chip warn">On va le chercher…</span>' : '<span class="chip lime">Prêt au comptoir</span>'}</div>
+        <div style="margin-top:14px">${c.status === 'stored' ? `<button class="btn block" data-a="coatFetch">${ic('hanger', 18)} Je pars bientôt — préparer mon manteau</button>` : c.status === 'fetching' ? `<p class="small muted">Le vestiaire prépare ton manteau, on te notifie dès qu’il est prêt.</p>` : `<button class="btn lime block" data-a="coatDone">${ic('check', 18)} J’ai récupéré mon manteau</button>`}</div></div>`;
+  return `${topbar('Ma soirée', `${CLUB.name} · ${CLUB.event}`)}
+  <div class="ticket fade-in">
+    <div class="ticket-top"><div class="row between"><span class="chip ok">${ic('check', 12)} Entrée validée</span><span class="xs muted">${hhmm(S.entryAt)}</span></div>
+      <p class="h1" style="font-size:24px;margin-top:14px">${CLUB.event}</p><p class="small muted">${CLUB.name} · ${CLUB.area} · Jeu. 5 nov.</p></div>
+    <div class="ticket-cut"></div>
+    <div class="ticket-bottom"><div class="qr">${qr('entry' + S.user.name)}</div><div><p class="eyebrow">Pass</p><p><b>${esc(S.user.name)}</b> · Entrée standard</p><p class="xs muted" style="margin-top:6px">Sortie/retour autorisé jusqu’à 03:00 avec ce QR.</p></div></div>
+  </div>
+  <div class="section">${coatBlock}</div>
+  ${since >= 3 ? `<div class="section"><div class="hydra">${ic('drop', 26)}<div class="grow"><b>Petite pause eau ?</b><p class="xs muted">${since} verres depuis ta dernière eau. Elle est offerte.</p></div><button class="btn sm" data-a="addWater">Ajouter</button></div></div>` : ''}
+  <div class="section"><div class="section-head"><h2 class="h2">Budget de la soirée</h2><span class="small"><b>${euro(sp)}</b>${S.budget ? ` / ${S.budget} €` : ''}</span></div>
+    <div class="card">${S.budget ? `<div class="meter"><i style="width:${Math.min(100, sp / S.budget * 100)}%;background:${sp > S.budget ? 'var(--bad)' : 'var(--lime)'}"></i></div><p class="xs muted" style="margin-top:8px">${sp > S.budget ? 'Budget dépassé — on te prévient avant chaque paiement.' : `Il te reste ${euro(S.budget - sp)}.`}</p>` : `<p class="small muted">Fixe-toi une limite, on t’alerte avant de la dépasser.</p>`}
+      <div class="budget-chips">${[null, 40, 60, 100, 200].map(b => `<button class="${S.budget === b ? 'on' : ''}" data-a="budget" data-v="${b ?? ''}">${b ? b + ' €' : 'Aucun'}</button>`).join('')}</div>
+      <p class="xs dim" style="margin-top:10px">${S.orders.length} commande(s) · ${alcoholCount()} verre(s) avec alcool</p></div></div>
+  <div class="section"><div class="section-head"><h2 class="h2">Sécurité</h2></div>
+    <div class="action-list">
+      <button class="action" data-a="safeRide"><span class="ai">${ic('car')}</span><span><b>Rentrer en VTC</b><span class="xs muted" style="display:block">Prise en charge devant le club</span></span><span class="chev">${ic('chev')}</span></button>
+      <button class="action" data-a="shareTrip"><span class="ai">${ic('share')}</span><span><b>Partager mon trajet</b><span class="xs muted" style="display:block">Un proche suit ton retour en direct</span></span><span class="chev">${ic('chev')}</span></button>
+      <button class="action alert" data-a="help"><span class="ai">${ic('shield')}</span><span><b>Besoin d’aide, discrètement</b><span class="xs muted" style="display:block">Alerte la sécurité du club sans attirer l’attention</span></span><span class="chev">${ic('chev')}</span></button>
+    </div></div>
+  ${S.orders.length ? `<div class="section"><div class="section-head"><h2 class="h2">Historique</h2></div>${S.orders.map(o => `<button class="action" style="margin-bottom:8px" data-a="openOrder" data-id="${o.id}"><span class="ai mono" style="font-family:var(--font-d);font-weight:700">${o.code}</span><span class="grow"><b>${o.lines.map(l => `${l.qty}× ${esc(l.name)}`).join(', ')}</b><span class="xs muted" style="display:block">${hhmm(o.at)} · ${euro(o.total)} · ${STATUS[o.status].t}</span></span></button>`).join('')}</div>` : ''}`;
+}
+
+function vProfile() {
+  const pts = S.points, goal = 150;
+  return `${topbar('Profil', 'Ton compte')}
+  <div class="profile-head fade-in"><span class="avatar">${esc(S.user.name[0].toUpperCase())}</span><div><p class="h2">${esc(S.user.name)}</p><p class="small muted">Membre Club&amp;Co · Night Owl</p></div></div>
+  <div class="loyalty"><div class="row between"><div><p class="eyebrow">Points fidélité</p><p class="h1" style="margin-top:6px">${pts} <span class="small muted">pts</span></p></div><span class="lime">${ic('star', 30)}</span></div>
+    <div class="meter"><i style="width:${Math.min(100, pts / goal * 100)}%"></i></div>
+    <p class="xs muted" style="margin-top:8px">${pts >= goal ? '🎉 Un cocktail offert t’attend au bar !' : `Encore ${goal - pts} pts pour un cocktail offert · 1 € = 1 pt`}</p></div>
+  <div class="section"><div class="section-head"><h2 class="h2">Réglages</h2></div>
+    <div class="action-list">
+      <button class="action ${S.notifOn ? 'on' : ''}" data-a="toggleNotif"><span class="ai">${ic('bell')}</span><span class="grow"><b>Notifications</b><span class="xs muted" style="display:block">${'Notification' in window ? 'Commande prête, réponse du DJ, vestiaire' : 'Installe l’app sur l’écran d’accueil pour les activer'}</span></span><span class="switch lime-switch"></span></button>
+      <div class="action"><span class="ai">${ic('wallet')}</span><span class="grow"><b>Paiement</b><span class="xs muted" style="display:block">Paiement mobile · Carte •••• 4242</span></span><span class="chip ghost">Démo</span></div>
+    </div></div>
+  <div class="section"><div class="section-head"><h2 class="h2">Espace pro <span class="tag">Démo</span></h2></div>
+    <p class="small muted" style="margin-bottom:10px">Mets-toi à la place du staff pour voir l’autre côté de l’app.</p>
+    <div class="action-list">
+      <button class="action" data-a="pro" data-mode="bar"><span class="ai lime">${ic('glass')}</span><span class="grow"><b>Vue barman</b><span class="xs muted" style="display:block">File des commandes, préparation, remise</span></span><span class="chev">${ic('chev')}</span></button>
+      <button class="action" data-a="pro" data-mode="dj"><span class="ai violet">${ic('headphones')}</span><span class="grow"><b>Vue DJ</b><span class="xs muted" style="display:block">Accepter ou refuser les demandes de sons</span></span><span class="chev">${ic('chev')}</span></button>
+    </div></div>
+  <div class="section"><button class="btn danger block" data-a="reset">${ic('refresh', 18)} Réinitialiser la démo</button>
+    <p class="fine">Club&amp;Co · prototype v0.1 — les données restent sur ton téléphone.</p></div>`;
+}
+
+function vOrder(id) {
+  const o = S.orders.find(x => x.id === id);
+  if (!o) { S.screen = null; return vHome(); }
+  const st = STATUS[o.status], ready = o.status === 'ready';
+  const steps = [['received', 'Commande reçue', 'Payée · ' + hhmm(o.at)], ['preparing', 'En préparation', 'Ton barman s’en occupe'], ['ready', o.table ? 'En route vers ta table' : 'Prête au comptoir', pickupLabel(o)]];
+  return `<button class="back-btn" data-a="back">${ic('back', 18)} Retour</button>
+  <section class="order-hero ${ready ? 'ready' : ''} fade-in">
+    <p class="eyebrow">${st.t}</p>
+    <p class="code-big">${o.code}</p>
+    <p class="${ready ? '' : 'muted'} small"><b>${pickupLabel(o)}</b></p>
+    ${o.status === 'picked' ? '' : `<div class="qr">${qr(o.id)}</div><p class="xs ${ready ? '' : 'muted'}">Montre ce code au barman</p>`}
+  </section>
+  ${o.status !== 'picked' ? `<div class="card section"><div class="steps">${steps.map(([k, t, s]) => {
+    const n = STATUS[k].n, cls = st.n > n ? 'done' : st.n === n ? (k === 'ready' ? 'done' : 'cur') : 'todo';
+    return `<div class="step ${cls}"><span class="sdot">${cls === 'done' ? ic('check', 16) : ''}</span><div><b>${t}</b><span class="xs muted">${s}${cls === 'cur' && !o.manual ? ` · <span data-eta="${k === 'received' ? o.prepAt : o.readyAt}"></span>` : ''}</span></div></div>`;
+  }).join('')}</div>
+  ${!ready ? `<p class="xs dim" style="margin-top:14px">${ic('bell', 13, 'style="display:inline;vertical-align:-2px"')} Retourne danser — ton téléphone vibre quand c’est prêt. (Démo : préparation accélérée)</p>` : ''}</div>` : ''}
+  <div class="card section"><p class="eyebrow" style="margin-bottom:6px">Détail</p>
+    ${o.lines.map(l => `<div class="row between small" style="padding:6px 0"><span>${l.qty}× ${esc(l.name)}${l.gift ? ` <span class="tag">🎁 pour ${esc(l.gift)}</span>` : ''}${l.note ? `<span class="xs muted" style="display:block">${esc(l.note)}</span>` : ''}</span><span>${l.unit ? euro(l.qty * l.unit) : 'Offert'}</span></div>`).join('')}
+    ${o.tip ? `<div class="row between small muted" style="padding:6px 0"><span>Pourboire</span><span>${euro(o.tip)}</span></div>` : ''}
+    <div class="row between" style="padding-top:10px;margin-top:6px;border-top:1px solid var(--line)"><b>Total payé</b><b>${euro(o.total)}</b></div></div>
+  ${ready ? `<button class="btn lime block section" data-a="picked" data-id="${o.id}">${ic('check', 18)} J’ai récupéré ma commande</button>` : ''}
+  ${o.status === 'picked' ? `<button class="btn block section" data-a="reorder" data-id="${o.id}">${ic('refresh', 18)} Recommander la même chose</button>` : ''}`;
+}
+
+/* ---------- Vues : espace pro ---------- */
+function proBanner(kind) {
+  return `<div class="pro-banner ${kind === 'bar' ? 'bar' : ''}"><span>${ic(kind === 'bar' ? 'glass' : 'headphones', 16, 'style="display:inline;vertical-align:-3px"')}&nbsp; ESPACE PRO · ${kind === 'bar' ? 'BARMAN' : 'DJ'} (démo)</span><button data-a="exitPro">Quitter</button></div>`;
+}
+function vProBar() {
+  const all = [...S.orders.filter(o => o.status !== 'picked').map(o => ({ ...o, mine: true, who: S.user.name })), ...S.fakeOrders.filter(o => o.status !== 'picked')];
+  const col = (st, title) => {
+    const list = all.filter(o => o.status === st);
+    return `<div class="col-title"><h2 class="h2">${title}</h2><span class="n">${list.length}</span></div>${list.length ? list.map(o => `
+      <div class="ticket-order ${o.mine ? 'mine' : ''}"><div class="row between"><span class="code">${o.code}</span><span class="xs muted">${esc(o.who)} · ${o.table ? 'Table ' + esc(o.table) : CLUB.bars[o.bar].name} · ${ago(o.at)}</span></div>
+        <ul>${o.lines.map(l => `<li><b>${l.qty}×</b> ${esc(l.name)}${l.note ? ` <span class="muted">— ${esc(l.note)}</span>` : ''}</li>`).join('')}</ul>
+        ${st === 'received' ? `<button class="btn sm block" data-a="proOrder" data-id="${o.id}" data-st="preparing">Lancer la préparation</button>` : st === 'preparing' ? `<button class="btn sm lime block" data-a="proOrder" data-id="${o.id}" data-st="ready">${ic('bell', 16)} Prête — notifier le client</button>` : `<button class="btn sm block" data-a="proOrder" data-id="${o.id}" data-st="picked">${ic('qr', 16)} Code scanné — remise</button>`}
+      </div>`).join('') : `<div class="empty">Rien ici</div>`}`;
+  };
+  const rev = S.orders.reduce((a, o) => a + o.total, 0) + 412;
+  return `${proBanner('bar')}
+  <h1 class="h1">Commandes</h1><p class="small muted" style="margin:6px 0 16px">${CLUB.name} · tous les bars</p>
+  <div class="kpis"><div class="kpi"><p class="eyebrow">En cours</p><p class="v">${all.filter(o => o.status !== 'ready').length}</p></div><div class="kpi"><p class="eyebrow">Temps moy.</p><p class="v">2:40</p></div><div class="kpi"><p class="eyebrow">CA soirée</p><p class="v">${Math.round(rev)}€</p></div></div>
+  ${col('received', 'Nouvelles')}${col('preparing', 'En préparation')}${col('ready', 'Prêtes à remettre')}`;
+}
+function vProDJ() {
+  const pending = S.requests.filter(r => r.status === 'pending').sort((a, b) => (b.boost | 0) - (a.boost | 0) || b.votes - a.votes);
+  const queue = S.requests.filter(r => r.status === 'accepted');
+  const tips = S.requests.filter(r => r.boost && r.status !== 'declined').length * 3;
+  const tr = currentTrack();
+  return `${proBanner('dj')}
+  <h1 class="h1">Demandes</h1><p class="small muted" style="margin:6px 0 16px">Triées par boost puis par votes de la salle</p>
+  <div class="card np"><span class="np-art"><span class="eq"><i></i><i></i><i></i><i></i></span></span><span class="grow"><span class="eyebrow">Sur les platines</span><span class="np-t" data-np-t style="display:block">${esc(tr.t)}</span><span class="muted small" data-np-a>${esc(tr.a)}</span><span class="progress"><i data-np-p></i></span></span></div>
+  <div class="kpis" style="margin-top:10px"><div class="kpi"><p class="eyebrow">En attente</p><p class="v">${pending.length}</p></div><div class="kpi"><p class="eyebrow">Dans la file</p><p class="v">${queue.length}</p></div><div class="kpi"><p class="eyebrow">Pourboires</p><p class="v">${tips}€</p></div></div>
+  <div class="col-title"><h2 class="h2">À traiter</h2><span class="n">${pending.length}</span></div>
+  ${pending.length ? pending.map(r => `<div class="ticket-order ${r.mine ? 'mine' : ''}">
+    <div class="row"><span class="cover" style="--h:${trackHue(r.t)}">${initials(r.t)}</span><div class="grow" style="min-width:0"><p class="t-name">${esc(r.t)} ${r.boost ? '<span class="tag">Boost</span>' : ''}</p><p class="t-sub">${esc(r.a)} · ${r.mine ? esc(S.user.name) : esc(r.by)} · ${ago(r.at)}</p></div><span class="vote on">${ic('heart', 16)}${r.votes}</span></div>
+    ${r.msg ? `<p class="req-reason" style="margin:8px 0 0">💬 ${esc(r.msg)}</p>` : ''}
+    <div class="row" style="margin-top:12px;gap:8px"><button class="btn sm danger grow" data-a="djDecline" data-id="${r.id}">${ic('x', 16)} Refuser</button><button class="btn sm violet grow" data-a="djAccept" data-id="${r.id}">${ic('check', 16)} Accepter</button></div>
+  </div>`).join('') : `<div class="empty">Aucune demande en attente</div>`}
+  <div class="col-title"><h2 class="h2">Ma file</h2><span class="n">${queue.length}</span></div>
+  ${queue.length ? queue.map(r => `<div class="ticket-order"><div class="row"><span class="cover" style="--h:${trackHue(r.t)}">${initials(r.t)}</span><div class="grow" style="min-width:0"><p class="t-name">${esc(r.t)}</p><p class="t-sub">${esc(r.a)} · ${r.mine ? esc(S.user.name) : esc(r.by)}</p></div><button class="btn xs lime" data-a="djPlay" data-id="${r.id}">${ic('wave', 14)} Jouer</button></div></div>`).join('') : `<div class="empty">File vide</div>`}`;
+}
+
+/* ---------- Sheets ---------- */
+let sheetFn = null, draft = null;
+function openSheet(fn) { sheetFn = fn; $('.sheet-body').innerHTML = fn(); $('#sheet').classList.add('open'); $('#sheet').setAttribute('aria-hidden', 'false'); $('.sheet').scrollTop = 0; }
+function closeSheet() { sheetFn = null; $('#sheet').classList.remove('open'); $('#sheet').setAttribute('aria-hidden', 'true'); }
+function refreshSheet() { if (sheetFn) keepFocus(() => { $('.sheet-body').innerHTML = sheetFn(); }); }
+
+function sItem() {
+  const m = byId(draft.id), unit = m.price + (draft.premium ? 3 : 0);
+  return `<div class="thumb xl" style="--h:${m.h}">${m.emoji}</div>
+  <div class="row between" style="margin-top:18px;align-items:flex-start"><div><p class="sheet-title">${m.name}</p><p class="small muted" style="margin-top:4px">${m.desc}</p></div><b style="font-size:18px;white-space:nowrap">${m.price ? euro(m.price) : 'Offert'}</b></div>
+  ${m.premium ? `<p class="opt-label">Alcool</p><div class="options"><button class="opt ${!draft.premium ? 'on' : ''}" data-a="d" data-k="premium" data-v="">Standard<span class="radio"></span></button><button class="opt ${draft.premium ? 'on' : ''}" data-a="d" data-k="premium" data-v="1">Premium <span class="muted small" style="margin-left:auto;margin-right:10px">+3,00 €</span><span class="radio"></span></button></div>` : ''}
+  ${m.ice ? `<p class="opt-label">Glaçons</p><div class="options cols">${['Normal', 'Peu', 'Sans'].map(v => `<button class="opt ${draft.ice === v ? 'on' : ''}" data-a="d" data-k="ice" data-v="${v}">${v}</button>`).join('')}</div>` : ''}
+  ${m.table ? `<p class="opt-label">Numéro de table</p><input class="field" id="d-table" inputmode="numeric" maxlength="3" placeholder="Ex : 4 (indiqué sur ta table)" value="${esc(draft.table)}" data-in="dTable">` : ''}
+  <p class="opt-label">Pour qui ?</p>
+  <div class="options cols" style="grid-template-columns:1fr 1fr"><button class="opt ${!draft.giftOn ? 'on' : ''}" data-a="d" data-k="giftOn" data-v="">Pour moi</button><button class="opt ${draft.giftOn ? 'on' : ''}" data-a="d" data-k="giftOn" data-v="1">${ic('gift', 16)} Offrir</button></div>
+  ${draft.giftOn ? `<input class="field" id="d-gift" style="margin-top:8px" maxlength="20" placeholder="Prénom de ton ami·e" value="${esc(draft.gift)}" data-in="dGift"><p class="xs muted" style="margin-top:6px">Il/elle reçoit le code de retrait sur son téléphone.</p>` : ''}
+  <div class="sheet-actions"><div class="stepper lg"><button data-a="dQty" data-v="-1" aria-label="Moins">${ic('minus')}</button><span>${draft.qty}</span><button data-a="dQty" data-v="1" aria-label="Plus">${ic('plus')}</button></div>
+    <button class="btn lime grow" data-a="addToCart">Ajouter <span class="price">${unit ? euro(unit * draft.qty) : 'Offert'}</span></button></div>`;
+}
+function sCart() {
+  if (!S.cart.length) return `<p class="sheet-title">Ton panier</p><div class="empty" style="margin-top:16px">Ton panier est vide</div><button class="btn block" style="margin-top:16px" data-a="closeSheet">Retour au bar</button>`;
+  const sub = cartSub(), tip = tipAmt(), tot = sub + tip, over = S.budget && spent() + tot > S.budget;
+  const table = S.cart.find(l => l.table)?.table;
+  return `<div class="row between"><p class="sheet-title">Ton panier</p><span class="chip ghost">${table ? 'Table ' + esc(table) : CLUB.bars[S.bar].name}</span></div>
+  <div style="margin-top:8px">${S.cart.map(l => { const m = byId(l.id); return `<div class="line"><span class="thumb" style="--h:${m.h}">${m.emoji}</span><div class="grow" style="min-width:0"><b class="small">${esc(l.name)}${l.premium ? ' · premium' : ''}</b><p class="xs muted">${[l.ice && l.ice !== 'Normal' ? l.ice + ' glaçons' : '', l.gift ? '🎁 pour ' + esc(l.gift) : ''].filter(Boolean).join(' · ') || (l.unit ? euro(l.unit) : 'Offert')}</p></div><div class="stepper"><button data-a="lineQty" data-k="${l.key}" data-v="-1" aria-label="Moins">${ic('minus', 16)}</button><span>${l.qty}</span><button data-a="lineQty" data-k="${l.key}" data-v="1" aria-label="Plus">${ic('plus', 16)}</button></div></div>`; }).join('')}</div>
+  <p class="opt-label">Pourboire pour l’équipe</p>
+  <div class="options cols">${[0, 5, 10].map(p => `<button class="opt ${S.tip === p ? 'on' : ''}" data-a="tip" data-v="${p}">${p ? p + ' %' : 'Non merci'}</button>`).join('')}</div>
+  <p class="opt-label">Paiement</p>
+  <div class="options">
+    <button class="pay-method ${S.pay === 'wallet' ? 'on' : ''}" data-a="payM" data-v="wallet"><span class="card-ico wallet">${ic('wallet', 14)}</span><span class="grow"><b class="small">Paiement mobile</b><span class="xs muted" style="display:block">Validation biométrique</span></span><span class="radio"></span></button>
+    <button class="pay-method ${S.pay === 'card' ? 'on' : ''}" data-a="payM" data-v="card"><span class="card-ico">VISA</span><span class="grow"><b class="small">Carte •••• 4242</b><span class="xs muted" style="display:block">Enregistrée</span></span><span class="radio"></span></button>
+  </div>
+  <div class="totals"><div class="row"><span class="muted">Sous-total</span><span>${euro(sub)}</span></div>${tip ? `<div class="row"><span class="muted">Pourboire</span><span>${euro(tip)}</span></div>` : ''}<div class="row"><span class="muted">Frais de service</span><span class="lime">Offerts</span></div><div class="row grand"><span>Total</span><span>${euro(tot)}</span></div></div>
+  ${over ? `<div class="warn-box">${ic('wallet', 18)} Cette commande te fait dépasser ton budget de ${S.budget} €.</div>` : ''}
+  <p class="xs muted" style="margin-top:12px">+${Math.floor(tot)} pts fidélité · ${table ? 'servi à ta table' : `à retirer au ${CLUB.bars[S.bar].name}`}</p>
+  <button class="btn lime block" style="margin-top:14px;height:60px" data-a="pay">${ic(S.pay === 'wallet' ? 'wallet' : 'card', 20)} Payer ${euro(tot)}</button>`;
+}
+const sPaying = done => `<div class="paying"><div>${done ? `<div class="done-check">${ic('check', 54)}</div><p class="sheet-title">Paiement accepté</p><p class="small muted" style="margin-top:6px">Ta commande part au bar</p>` : `<div class="ring"></div><p class="sheet-title">Validation…</p><p class="small muted" style="margin-top:6px">Paiement sécurisé (simulation)</p>`}</div></div>`;
+
+function sPropose() {
+  const tr = draft.track;
+  return `<p class="eyebrow">Proposer au DJ</p>
+  <div class="track" style="margin-top:12px"><span class="cover" style="--h:${trackHue(tr.t)}">${initials(tr.t)}</span><span class="grow"><span class="t-name" style="display:block">${esc(tr.t)}</span><span class="t-sub" style="display:block">${esc(tr.a)}</span></span></div>
+  <p class="opt-label">Un mot pour ${CLUB.dj} ? <span class="dim">(optionnel)</span></p>
+  <textarea class="field" id="d-msg" maxlength="80" placeholder="Ex : C’est l’anniv de Clara 🎂" data-in="dMsg">${esc(draft.msg)}</textarea>
+  <button class="boost-box ${draft.boost ? 'on' : ''}" data-a="d" data-k="boost" data-v="${draft.boost ? '' : '1'}"><span class="bi">${ic('bolt', 20)}</span><span class="grow"><b>Booster · 3 €</b><span class="xs muted" style="display:block">Ta demande passe en tête de liste et le DJ reçoit un pourboire. Remboursé si refusé.</span></span><span class="switch"></span></button>
+  <button class="btn violet block" style="margin-top:20px" data-a="sendReq">${ic('send', 18)} Envoyer au DJ${draft.boost ? ' · 3,00 €' : ''}</button>
+  <p class="fine">3 demandes actives max par personne, pour laisser la place à tout le monde.</p>`;
+}
+function sNotifs() {
+  S.notifs.forEach(n => { n.read = true; });
+  return `<p class="sheet-title">Notifications</p>
+  <div style="margin-top:12px">${S.notifs.length ? S.notifs.map(n => `<button class="action" style="margin-bottom:8px" data-a="goNotif" data-id="${n.id}"><span class="ai" style="color:var(--lime)">${ic('bell', 18)}</span><span class="grow"><b class="small">${esc(n.title)}</b><span class="xs muted" style="display:block">${esc(n.body)}</span></span><span class="xs dim">${hhmm(n.at)}</span></button>`).join('') : '<div class="empty">Rien pour l’instant. Commande un verre ou propose un son !</div>'}</div>`;
+}
+const sTicket = () => `<p class="sheet-title">Mon entrée</p><p class="small muted" style="margin-top:4px">${CLUB.event} · ${CLUB.name}</p>
+  <div class="qr" style="width:220px;height:220px;margin:22px auto">${qr('entry' + S.user.name)}</div>
+  <p class="center small" style="text-align:center"><b>${esc(S.user.name)}</b> · Entrée validée à ${hhmm(S.entryAt)}</p>
+  <p class="fine">Présente ce QR à la sécurité pour sortir et revenir (jusqu’à 03:00).</p>`;
+const sSafety = () => `<p class="sheet-title">Rentrer en sécurité</p><p class="small muted" style="margin:4px 0 16px">Parce qu’une bonne soirée se termine bien.</p>
+  <div class="action-list">
+    <button class="action" data-a="safeRide"><span class="ai">${ic('car')}</span><span><b>Commander un VTC</b><span class="xs muted" style="display:block">Prise en charge devant le club · ~6 min</span></span></button>
+    <button class="action" data-a="shareTrip"><span class="ai">${ic('share')}</span><span><b>Partager mon trajet</b><span class="xs muted" style="display:block">Envoie un lien de suivi à un proche</span></span></button>
+    <button class="action" data-a="help"><span class="ai" style="color:#ff8b97">${ic('shield')}</span><span><b>Besoin d’aide, discrètement</b><span class="xs muted" style="display:block">La sécurité vient te trouver</span></span></button>
+    <a class="action" href="tel:112" style="color:inherit;text-decoration:none"><span class="ai">${ic('phone')}</span><span><b>Urgences · 112</b><span class="xs muted" style="display:block">Appel direct</span></span></a>
+  </div>`;
+const sHelp = () => `<p class="sheet-title">Alerte discrète</p><p class="small muted" style="margin:4px 0 4px">Un agent de sécurité vient te retrouver, sans que personne ne le remarque. Où es-tu ?</p>
+  <div class="options" style="margin-top:14px">${['Piste principale', 'Près du bar principal', 'Toilettes', 'Rooftop', 'Entrée / fumoir'].map(z => `<button class="opt" data-a="sendHelp" data-v="${z}">${z}${ic('chev', 18)}</button>`).join('')}</div>
+  <p class="fine">Démo : aucune alerte réelle n’est envoyée.</p>`;
+const sDecline = id => `<p class="sheet-title">Refuser la demande</p><p class="small muted" style="margin:4px 0 14px">Le client verra ta raison — reste sympa 😉</p>
+  <div class="options">${DECLINE_REASONS.map(r => `<button class="opt" data-a="djDeclineGo" data-id="${id}" data-v="${r}">${r}${ic('chev', 18)}</button>`).join('')}</div>`;
+
+/* ---------- Takeover ---------- */
+function renderTakeover() {
+  const el = $('#takeover'), tk = S.takeover;
+  if (!tk) { el.classList.remove('open'); el.innerHTML = ''; return; }
+  if (tk.type === 'order') {
+    const o = S.orders.find(x => x.id === tk.id); if (!o) { S.takeover = null; return renderTakeover(); }
+    el.innerHTML = `<div class="tko"><p class="eyebrow" style="color:rgba(16,20,10,.6)">Club&amp;Co · ${CLUB.name}</p><p class="big" style="margin-top:14px">C’est prêt !</p>
+      <p class="code-big">${o.code}</p><p><b>${pickupLabel(o)}</b></p><p class="small" style="opacity:.7;margin-top:4px">${o.lines.map(l => `${l.qty}× ${esc(l.name)}`).join(' · ')}</p>
+      <div style="display:grid;gap:10px;width:100%;margin-top:34px"><button class="btn block" data-a="tkoOrder" data-id="${o.id}">${ic('qr', 18)} Afficher mon code</button><button class="btn ghost block" data-a="tkoClose">J’y vais</button></div></div>`;
+  } else {
+    const r = S.requests.find(x => x.id === tk.id);
+    el.innerHTML = `<div class="tko violet"><span class="eq" style="height:40px;transform:scale(1.6)"><i></i><i></i><i></i><i></i></span><p class="big" style="margin-top:30px">C’est ton son !</p>
+      <p class="h2" style="margin-top:22px;font-size:22px">${esc(r?.t || '')}</p><p style="opacity:.75">${esc(r?.a || '')}</p>
+      <div style="display:grid;gap:10px;width:100%;margin-top:40px"><button class="btn block" data-a="tkoClose">Je fonce sur la piste 🕺</button></div></div>`;
+  }
+  el.classList.add('open');
+}
+
+/* ---------- Rendu ---------- */
+function keepFocus(fn) {
+  const a = document.activeElement, id = a && a.id, s = a && a.selectionStart;
+  fn();
+  if (id) { const el = document.getElementById(id); if (el && el !== a) { el.focus({ preventScroll: true }); try { el.setSelectionRange(s, s); } catch (e) { /* ignore */ } } }
+}
+let lastKey = '';
+function render() {
+  keepFocus(() => {
+    const view = $('#view');
+    let html, key;
+    if (!S.user) { html = vOnboarding(); key = 'onb'; }
+    else if (S.pro) { html = S.pro === 'bar' ? vProBar() : vProDJ(); key = 'pro' + S.pro; }
+    else if (S.screen) { html = vOrder(S.screen.id); key = 'order' + S.screen.id; }
+    else { html = ({ home: vHome, bar: vBar, music: vMusic, night: vNight, profile: vProfile }[S.tab] || vHome)(); key = S.tab; }
+    view.innerHTML = html;
+    const showNav = S.user && !S.pro;
+    const showCart = showNav && !S.screen && S.tab === 'bar' && S.cart.length > 0;
+    view.className = !showNav ? 'no-nav' : showCart ? 'with-cart' : '';
+    if (key !== lastKey) { $('#scroll').scrollTop = 0; lastKey = key; }
+    renderNav(showNav); renderCart(showCart);
+  });
+  renderTakeover();
+  updateLive();
+}
+function renderNav(show) {
+  const nav = $('#nav'); nav.classList.toggle('hide', !show);
+  if (!show) return;
+  const act = activeOrders().length, tabs = [['home', 'Accueil', 'home'], ['bar', 'Bar', 'glass', act], ['music', 'Musique', 'music', myPending().length], ['night', 'Soirée', 'moon'], ['profile', 'Profil', 'user']];
+  nav.innerHTML = tabs.map(([k, l, i, b]) => `<button class="${S.tab === k && !S.screen ? 'on' : ''}" data-a="tab" data-tab="${k}"><span class="ni">${ic(i, 21)}</span>${l}${b ? `<span class="badge">${b}</span>` : ''}</button>`).join('');
+}
+let lastCount = 0;
+function renderCart(show) {
+  const el = $('#cartbar'), n = cartCount();
+  el.classList.toggle('hide', !show);
+  if (!show) return;
+  el.innerHTML = `<button class="cart-pill ${n !== lastCount ? 'bump' : ''}" data-a="cart"><span class="count">${n}</span>Voir le panier<span class="go">${euro(cartSub())} ${ic('chev', 18)}</span></button>`;
+  lastCount = n;
+}
+function go(target) {
+  S.pro = null; closeSheet();
+  if (target.startsWith('order:')) S.screen = { name: 'order', id: target.slice(6) };
+  else { S.screen = null; S.tab = target; }
+  save(); render();
+}
+
+/* ---------- Actions ---------- */
+const A = {
+  enter() {
+    const name = ($('#onb-name').value || '').trim() || 'Toi';
+    S.user = { name: name.charAt(0).toUpperCase() + name.slice(1) }; S.tab = 'home'; save(); render();
+    setTimeout(() => notify(`Bienvenue au ${CLUB.name} ✨`, 'Ta soirée est prête : commande, propose tes sons, profite.', { go: 'home', soft: true }), 900);
+  },
+  tab: d => { S.tab = d.tab; S.screen = null; save(); render(); },
+  cat: d => { S.cat = d.cat; save(); render(); },
+  setBar: d => { S.bar = d.bar; save(); render(); },
+  item: d => { const m = byId(d.id); draft = { id: d.id, qty: 1, premium: false, ice: m.ice ? 'Normal' : null, table: '', giftOn: false, gift: '' }; openSheet(sItem); },
+  quickAdd: (d, e) => { e.stopPropagation(); addLine({ id: d.id, qty: 1, premium: false, ice: byId(d.id).ice ? 'Normal' : null }); if (byId(d.id).table) { A.item(d); } },
+  d: d => { draft[d.k] = d.v === '' ? false : d.v === '1' ? true : d.v; refreshSheet(); },
+  dQty: d => { draft.qty = Math.max(1, Math.min(20, draft.qty + +d.v)); refreshSheet(); },
+  addToCart() {
+    const m = byId(draft.id);
+    if (m.table && !String(draft.table).trim()) { flash('Indique ton numéro de table'); $('#d-table')?.focus(); return; }
+    addLine({ ...draft, gift: draft.giftOn ? (draft.gift.trim() || 'un·e ami·e') : null });
+    closeSheet();
+  },
+  cart: () => openSheet(sCart),
+  lineQty: d => { const l = S.cart.find(x => x.key === d.k); if (!l) return; l.qty += +d.v; if (l.qty <= 0) S.cart = S.cart.filter(x => x !== l); save(); render(); refreshSheet(); if (!S.cart.length) closeSheet(); },
+  tip: d => { S.tip = +d.v; save(); refreshSheet(); },
+  payM: d => { S.pay = d.v; save(); refreshSheet(); },
+  pay() {
+    askNotif();
+    $('.sheet-body').innerHTML = sPaying(false); sheetFn = null;
+    setTimeout(() => {
+      $('.sheet-body').innerHTML = sPaying(true); if (navigator.vibrate) navigator.vibrate(40); chime(true);
+      setTimeout(() => {
+        const t = now(), table = S.cart.find(l => l.table)?.table || null, tip = tipAmt();
+        const o = { id: uid(), code: genCode(), lines: S.cart.map(l => ({ id: l.id, name: l.name + (l.premium ? ' (premium)' : ''), qty: l.qty, unit: l.unit, gift: l.gift, alcohol: l.alcohol, note: [l.ice && l.ice !== 'Normal' ? l.ice + ' glaçons' : '', l.gift ? 'Offert à ' + l.gift : ''].filter(Boolean).join(' · ') })),
+          total: cartSub() + tip, tip, bar: S.bar, table, status: 'received', at: t, prepAt: t + PREP_DELAY, readyAt: t + READY_DELAY + (table ? 6000 : 0) };
+        S.orders.unshift(o); S.points += Math.floor(o.total); S.cart = []; S.tip = 0; S.screen = { name: 'order', id: o.id };
+        save(); closeSheet(); render();
+        if (o.lines.some(l => l.gift)) setTimeout(() => flash(`🎁 ${o.lines.find(l => l.gift).gift} a reçu le code ${o.code}`), 1500);
+      }, 900);
+    }, 1400);
+  },
+  openOrder: d => { S.screen = { name: 'order', id: d.id }; save(); render(); },
+  back: () => { S.screen = null; save(); render(); },
+  picked: d => { const o = S.orders.find(x => x.id === d.id); if (o) { o.status = 'picked'; o.manual = true; } S.screen = null; save(); render(); flash('Santé ! 🥂 Bonne soirée'); },
+  reorder: d => { const o = S.orders.find(x => x.id === d.id); o.lines.forEach(l => { const m = byId(l.id); if (m) addLine({ id: l.id, qty: l.qty, premium: /premium/.test(l.name), ice: m.ice ? 'Normal' : null, table: o.table || '' }, true); }); S.screen = null; S.tab = 'bar'; save(); render(); openSheet(sCart); },
+  addWater: () => { addLine({ id: 'f4', qty: 1 }, true); S.tab = 'bar'; S.cat = 'softs'; save(); render(); openSheet(sCart); },
+  propose: d => { if (myPending().length >= 3) return flash('3 demandes en attente max — attends une réponse du DJ'); draft = { track: TRACKS.find(t => t.id === d.id), msg: '', boost: false }; openSheet(sPropose); },
+  proposeCustom: () => { if (myPending().length >= 3) return flash('3 demandes en attente max — attends une réponse du DJ'); draft = { track: { id: 'c' + uid(), t: query.trim(), a: 'Titre libre' }, msg: '', boost: false }; openSheet(sPropose); },
+  sendReq() {
+    const tr = draft.track;
+    if (S.requests.some(r => r.t.toLowerCase() === tr.t.toLowerCase() && ['pending', 'accepted'].includes(r.status))) { closeSheet(); return flash('Déjà demandé — vote pour lui dans la liste ❤️'); }
+    const r = { id: uid(), t: tr.t, a: tr.a, by: S.user.name, mine: true, votes: 1, voted: false, status: 'pending', boost: !!draft.boost, msg: draft.msg.trim(), at: now(), respondAt: now() + (draft.boost ? 9000 : 14000 + Math.random() * 8000) };
+    S.requests.unshift(r);
+    if (r.boost) S.extras.push({ ref: r.id, label: 'Boost DJ', amount: 3 });
+    askNotif(); query = ''; closeSheet(); save(); render();
+    flash(r.boost ? '⚡ Demande boostée envoyée au DJ' : '🎧 Demande envoyée au DJ');
+  },
+  vote: (d, e) => { e.stopPropagation(); const r = S.requests.find(x => x.id === d.id); if (!r || r.mine) return; r.voted = !r.voted; r.votes += r.voted ? 1 : -1; if (navigator.vibrate) navigator.vibrate(15); save(); render(); },
+  notifs: () => { openSheet(sNotifs); save(); render(); },
+  goNotif: d => { const n = S.notifs.find(x => x.id === d.id); closeSheet(); if (n && n.go) go(n.go); },
+  ticket: () => openSheet(sTicket),
+  safety: () => openSheet(sSafety),
+  safeRide: () => { closeSheet(); flash('🚗 Ouverture de ton appli VTC (démo)'); },
+  shareTrip: async () => {
+    closeSheet();
+    const data = { title: 'Club&Co', text: `Je rentre du ${CLUB.name}, suis mon trajet en direct 🚕` };
+    if (navigator.share) { try { await navigator.share(data); } catch (e) { /* annulé */ } } else flash('🔗 Lien de suivi copié (démo)');
+  },
+  help: () => openSheet(sHelp),
+  sendHelp: d => { closeSheet(); if (navigator.vibrate) navigator.vibrate(30); notify('Alerte envoyée 🛡️', `Un agent arrive · ${d.v} · ≈ 2 min. Reste où tu es.`, { soft: true }); },
+  coatDeposit() { askNotif(); S.coat = { num: 100 + Math.floor(Math.random() * 300), status: 'stored', at: now() }; S.extras.push({ label: 'Vestiaire', amount: 3 }); save(); render(); flash(`🧥 Ticket vestiaire #${S.coat.num} — payé 3 €`); },
+  coatFetch() { S.coat.status = 'fetching'; S.coat.readyAt = now() + 10000; save(); render(); flash('On prépare ton manteau, on te prévient'); },
+  coatDone() { S.coat.status = 'done'; save(); render(); flash('Bon retour 👋'); },
+  budget: d => { S.budget = d.v ? +d.v : null; save(); render(); },
+  async toggleNotif() {
+    if (S.notifOn) { S.notifOn = false; save(); render(); return; }
+    const ok = await askNotif();
+    if (!ok) flash('Notifications système indisponibles ici — les alertes in-app restent actives');
+    render();
+  },
+  pro: d => { S.pro = d.mode; save(); render(); },
+  exitPro: () => { S.pro = null; save(); render(); },
+  proOrder(d) {
+    const o = S.orders.find(x => x.id === d.id) || S.fakeOrders.find(x => x.id === d.id);
+    if (!o) return;
+    if (S.orders.includes(o)) o.manual = true;
+    setOrderStatus(o, d.st);
+    if (d.st === 'ready' && S.orders.includes(o)) flash(`📲 ${S.user.name} vient d’être notifié·e`);
+    save(); render();
+  },
+  djAccept: d => { const r = S.requests.find(x => x.id === d.id); setReq(r, 'accepted'); if (!r.mine) flash('Ajouté à ta file'); save(); render(); },
+  djDecline: d => openSheet(() => sDecline(d.id)),
+  djDeclineGo: d => { const r = S.requests.find(x => x.id === d.id); setReq(r, 'declined', d.v); closeSheet(); save(); render(); },
+  djPlay: d => { const r = S.requests.find(x => x.id === d.id); setReq(r, 'played'); flash(`▶︎ ${r.t} sur les platines`); save(); render(); },
+  tkoOrder: d => { S.takeover = null; S.screen = { name: 'order', id: d.id }; save(); render(); },
+  tkoClose: () => { S.takeover = null; render(); },
+  closeSheet,
+  reset() { if (!confirm('Réinitialiser toute la démo ?')) return; try { localStorage.removeItem(STORE); } catch (e) { /* ignore */ } S = seed(); query = ''; closeSheet(); render(); },
+};
+
+function addLine(o) {
+  const m = byId(o.id), unit = m.price + (o.premium ? 3 : 0);
+  const key = [o.id, o.premium ? 'p' : '', o.ice || '', o.table || '', o.gift || ''].join('|');
+  const ex = S.cart.find(l => l.key === key);
+  if (ex) ex.qty += o.qty;
+  else S.cart.push({ key, id: o.id, name: m.name, qty: o.qty, unit, premium: !!o.premium, ice: o.ice || null, table: m.table ? String(o.table || '').trim() || null : null, gift: o.gift || null, alcohol: !m.soft });
+  if (m.table && !S.cart.find(l => l.key === key).table) S.cart = S.cart.filter(l => l.key !== key); // bouteille sans table : passe par la fiche
+  if (navigator.vibrate) navigator.vibrate(12);
+  save(); render();
+}
+
+/* ---------- Événements ---------- */
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-a]');
+  if (!el || el.disabled) return;
+  const fn = A[el.dataset.a];
+  if (fn) { if (el.tagName !== 'A') e.preventDefault(); fn(el.dataset, e); }
+});
+const IN = {
+  query: v => { query = v; const r = $('#results'); if (r) r.innerHTML = resultsHTML(); },
+  dTable: v => { draft.table = v.replace(/\D/g, ''); },
+  dGift: v => { draft.gift = v; },
+  dMsg: v => { draft.msg = v; },
+};
+document.addEventListener('input', e => { const k = e.target.dataset.in; if (k && IN[k]) IN[k](e.target.value); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'onb-name') A.enter();
+  if (e.key === 'Escape') { if (S.takeover) A.tkoClose(); else closeSheet(); }
+});
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') tick(); });
+
+render();
+setInterval(tick, 1000);
